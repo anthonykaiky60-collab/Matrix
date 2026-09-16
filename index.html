@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>MATRIX — A escolha recomeça</title>
+    <meta name="description" content="Experiência de relançamento de Matrix. Uma contagem regressiva, uma falha na simulação, uma escolha.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<noscript>
+  <div style="padding:40px;font-family:sans-serif;max-width:600px;margin:0 auto;">
+    <h1>Matrix — o relançamento</h1>
+    <p>Esta experiência usa JavaScript para a animação e a contagem regressiva. Ative o JavaScript para vivenciar a versão completa. Enquanto isso: o relançamento está a caminho — em breve nos cinemas.</p>
+  </div>
+</noscript>
+
+<div id="announcer" class="sr-only" role="status" aria-live="polite"></div>
+
+<div class="top-controls">
+  <button id="skip-intro" class="chip-btn" type="button">Pular introdução</button>
+  <button id="sound-toggle" class="chip-btn" type="button" aria-pressed="false">
+    <span class="dot" aria-hidden="true"></span>
+    <span id="sound-label">Som desativado</span>
+  </button>
+</div>
+
+<div class="flash" id="flash" aria-hidden="true"></div>
+
+<section class="stage-white" id="stage-white" aria-hidden="false">
+  <p class="enigma" id="enigma"></p>
+  <div class="countdown-wrap">
+    <div class="countdown" id="countdown" data-value=""></div>
+  </div>
+</section>
+
+<canvas id="matrix-canvas" aria-hidden="true"></canvas>
+
+<main class="stage-reveal" id="stage-reveal">
+  <div class="hero">
+    <h1 class="glitch-title" id="glitch-title" data-text="MATRIX">MATRIX</h1>
+    <p class="tagline">Você já escolheu. Só ainda não sabe.</p>
+    <p class="release-line" id="release-line">RELANÇAMENTO NOS CINEMAS — 14 DE MARÇO</p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="#" id="cta-trailer">Assistir ao trailer</a>
+      <button class="btn btn-secondary" id="cta-more" type="button" aria-expanded="false" aria-controls="details-section">
+        Saiba mais
+      </button>
+      <button class="btn btn-glasses" id="cta-glasses" type="button" aria-haspopup="dialog" aria-controls="glasses-modal">
+        Óculos Meta × Matrix
+      </button>
+    </div>
+  </div>
+
+  <section class="details" id="details-section" hidden aria-label="Sobre o relançamento">
+    <div class="detail-block">
+      <h2>Uma versão restaurada</h2>
+      <p>A trilogia volta às telas em uma nova masterização, quadro a quadro, para uma geração que só conheceu a simulação em tela pequena.</p>
+    </div>
+    <div class="detail-block">
+      <h2>Nos cinemas</h2>
+      <p>Sessões especiais em salas selecionadas, com conteúdo exclusivo antes da exibição. Ingressos abrem em breve.</p>
+    </div>
+    <div class="detail-block">
+      <h2>A escolha</h2>
+      <p>Pílula azul ou vermelha — desta vez, a decisão também é sua fora da tela. Fique de olho nos próximos sinais.</p>
+    </div>
+  </section>
+
+  <p class="hint">mova o cursor ou toque na chuva de código — e experimente clicar nela.</p>
+</main>
+
+<div class="modal-overlay" id="glasses-modal" hidden>
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="glasses-modal-title">
+    <button class="modal-close" id="glasses-modal-close" type="button" aria-label="Fechar vídeo">✕</button>
+    <h2 id="glasses-modal-title">A realidade também tem um upgrade.</h2>
+    <p>Os óculos inteligentes da Meta trazem a interface digital para o seu campo de visão — a fronteira entre o mundo real e a simulação nunca esteve tão próxima.</p>
+    <video class="modal-video" id="glasses-video" controls playsinline preload="none">
+      <source src="assets/oculos-meta-matrix.mp4" type="video/mp4">
+      Seu navegador não é compatível com vídeo em HTML5.
+    </video>
+  </div>
+</div>
+
+<script src="script.js" defer></script>
+</body>
+</html>
