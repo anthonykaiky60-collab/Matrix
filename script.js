@@ -14,7 +14,7 @@
     matrixFontSize: 16,               // tamanho dos caracteres da chuva
     matrixSpeedMin: 0.4,
     matrixSpeedMax: 1.1,
-    matrixChars: "アイウエオカキクケコサシスセソ0123456789ﾊﾐﾑﾒﾓﾔﾕﾖ+=<>",
+    matrixChars: "アイウエオカキクケコサシスセソ0123456789M@TR!Xﾊﾐﾑﾒﾓﾔﾕﾖ+=<>",
     /*matrixChars: "0123456789",*/
     /*matrixChars: "01",*/
     interactionRadius: 130            // raio de reação ao cursor/toque, em px
