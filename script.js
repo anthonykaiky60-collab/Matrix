@@ -5,7 +5,7 @@
      CONFIG — ajuste aqui o ritmo e o conteúdo da experiência
      ========================================================= */
   var CONFIG = {
-    countdownFrom: 5,                 // segundos da contagem regressiva
+    countdownFrom: 10,                 // segundos da contagem regressiva
     enigmaLines: [
       "Você já sentiu que este mundo não é real?",
       "Alguém está prestes a te mostrar o porquê."
