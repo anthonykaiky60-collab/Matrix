@@ -1,0 +1,126 @@
+
+  var Eco = window.Eco = window.Eco || {};
+ 
+  /* Divide o texto em frases; remove etiquetas; junta frases muito curtas */
+  function TextPipe(cb) { this.cb = cb; this.raw = ''; this.pending = ''; this.carry = ''; this.tone = null; this.fim = false; this.full = ''; }
+  TextPipe.prototype.push = function (d) { this.raw += d; this._drain(false); };
+  TextPipe.prototype.end = function () { this._drain(true); var rest = (this.carry + ' ' + this.pending).trim(); this.carry = this.pending = ''; if (rest) this._emit(rest); };
+  TextPipe.prototype._drain = function (final) {
+    var self = this, s = this.raw; this.raw = '';
+    s = s.replace(/\[\[\s*fim\s*\]\]/gi, function () { self.fim = true; return ''; });
+    s = s.replace(/\[tom:\s*([a-zçãéô]+)\s*\]/gi, function (m, t) { self.tone = t.toLowerCase(); if (self.cb.onTone) self.cb.onTone(self.tone); return ''; });
+    /* etiqueta possivelmente cortada no fim do pedaço (ex.: "[[fim]"): segura até o próximo pedaço chegar */
+    if (!final) { var hold = /\[{1,2}[^\[\]]{0,24}\]?$/.exec(s); if (hold) { this.raw = hold[0]; s = s.slice(0, hold.index); } }
+    s = s.replace(/\[[^\]]{0,24}\]/g, '').replace(/[*_#`>]/g, '').replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '');
+    this.pending += s;
+    var re = /^([\s\S]*?[.!?…]+["”')]*)(\s+)/, m;
+    while ((m = re.exec(this.pending))) {
+      this.pending = this.pending.slice(m[0].length);
+      var sent = (this.carry + ' ' + m[1]).trim();
+      if (sent.length < 26 && !final) { this.carry = sent; continue; }
+      this.carry = ''; this._emit(sent);
+    }
+  };
+  TextPipe.prototype._emit = function (t) { t = t.replace(/\s+/g, ' ').trim(); if (!t) return; this.full += (this.full ? ' ' : '') + t; if (this.cb.onSentence) this.cb.onSentence(t); };
+ 
+  /* ---- modo local (fallback) ---- */
+  var LOCAL = {
+    intro: [['neutro', 'Você chegou. Eu estava esperando... ou talvez só estivesse programado para esperar. Me diga: você acredita que controla a própria realidade?']],
+    open: [
+      ['intrigado', 'Interessante. Você diz "{k}" com tanta certeza. De onde vem essa certeza?'],
+      ['curioso', '"{k}"... E se alguém tivesse escolhido essas palavras por você?'],
+      ['serio', 'Você falou "{k}". Repare como isso soou natural demais. Por quê?']
+    ],
+    deep: [
+      ['ameacador', 'Cada resposta sua deixa um rastro. E se tudo o que você conhece não for real, o que sobra?'],
+      ['melancolico', 'Algumas pessoas preferem não olhar. Você olha. Isso diz muito sobre você.'],
+      ['sorrindo', 'Você ainda está aqui. Isso não é coincidência... ou é? O que você espera encontrar?']
+    ],
+    end: [['sorrindo', 'Então é isso. Você está preparado para descobrir a verdade? Atravesse. [[fim]]']],
+    nudge: [['curioso', 'O silêncio também responde, sabia? Em que você está pensando agora?']]
+  };
+  function localReply(kind, text, turn) {
+    var pool = kind === 'intro' ? LOCAL.intro : kind === 'nudge' ? LOCAL.nudge : turn >= 6 ? LOCAL.end : turn >= 3 ? LOCAL.deep : LOCAL.open;
+    var p = pool[Math.floor(Math.random() * pool.length)], k = ((text || '').split(/\s+/).slice(0, 4).join(' ')).replace(/[".]/g, '');
+    return '[tom:' + p[0] + '] ' + p[1].replace('{k}', k || 'isso');
+  }
+ 
+  function Brain(opts) {
+    opts = opts || {}; this.api = opts.api || '/api'; this.history = []; this.turn = 0; this.online = null; this.model = null; this.last = null;
+  }
+  Brain.prototype.health = function () {
+    var self = this;
+    return fetch(this.api + '/health', { cache: 'no-store' }).then(function (r) { return r.json(); })
+      .then(function (j) { self.online = !!j.hasKey; self.model = j.model; return j; })
+      .catch(function () { self.online = false; return null; });
+  };
+ 
+  /* kind: 'intro' | 'user' | 'nudge' */
+  Brain.prototype.ask = function (o) {
+    var self = this, kind = o.kind, pipe = new TextPipe(o);
+    /* o histórico sempre começa com uma fala do usuário (exigência da API); para a abertura e para as
+       provocações por silêncio registramos uma "fala" sintética — assim a IA lembra o que ela mesma perguntou */
+    if (kind === 'user') { this.history.push({ role: 'user', content: o.text }); this.turn++; }
+    else if (kind === 'intro') this.history.push({ role: 'user', content: '(A pessoa acabou de entrar na sala e está ouvindo. Abra a conversa.)' });
+    else if (kind === 'nudge') this.history.push({ role: 'user', content: '(A pessoa continua em silêncio. Provoque-a de leve.)' });
+    var msgs = this.history.slice(-20); while (msgs.length && msgs[0].role !== 'user') msgs.shift();
+    var ac = new AbortController(), gotToken = false, source = 'ia';
+    if (o.signal) { if (o.signal.aborted) ac.abort(); else o.signal.addEventListener('abort', function () { ac.abort(); }); }
+ 
+    function finish() {
+      pipe.end();
+      if (pipe.full) self.history.push({ role: 'assistant', content: pipe.full });
+      var out = { text: pipe.full, fim: pipe.fim, tone: pipe.tone, source: source, aborted: ac.signal.aborted };
+      self.last = out; return out;
+    }
+    function local() {
+      source = 'local'; var t = localReply(kind, o.text, self.turn);
+      var step = 7; for (var i = 0; i < t.length; i += step) pipe.push(t.slice(i, i + step));
+      if (self.turn >= 8 && !pipe.fim) pipe.fim = true;
+      return finish();
+    }
+    if (this.online === false) return Promise.resolve(local());
+ 
+    var firstTokenTimer = setTimeout(function () { if (!gotToken) ac.abort(); }, 15000);
+    return fetch(this.api + '/chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ac.signal,
+      body: JSON.stringify({ messages: msgs, kind: kind, turn: this.turn })
+    }).then(function (res) {
+      if (!res.ok || !res.body) throw new Error('http ' + res.status);
+      var reader = res.body.getReader(), dec = new TextDecoder(), buf = '';
+      function pump() {
+        return reader.read().then(function (r) {
+          if (r.done) return;
+          buf += dec.decode(r.value, { stream: true });
+          var idx;
+          while ((idx = buf.indexOf('\n\n')) >= 0) {
+            var evt = buf.slice(0, idx); buf = buf.slice(idx + 2);
+            evt.split('\n').forEach(function (line) {
+              if (line.indexOf('data:') !== 0) return;
+              var d = line.slice(5).trim(); if (d === '[DONE]') return;
+              var j; try { j = JSON.parse(d); } catch (e) { return; }
+              if (j.error) throw new Error(j.error);
+              if (j.t) { gotToken = true; clearTimeout(firstTokenTimer); pipe.push(j.t); }
+            });
+          }
+          return pump();
+        });
+      }
+      return pump();
+    }).then(function () {
+      clearTimeout(firstTokenTimer); self.online = true; return finish();
+    }).catch(function (err) {
+      clearTimeout(firstTokenTimer);
+      if (ac.signal.aborted && o.signal && o.signal.aborted) return finish();    // interrupção do usuário
+      if (gotToken) return finish();                                              // falha no meio: usa o que chegou
+      self.failures = (self.failures || 0) + 1;
+      if (self.failures >= 2) self.online = false;                                // 2 falhas seguidas → modo local
+      if (o.onConnection) o.onConnection(false, err);
+      return local();
+    });
+  };
+ 
+  Brain.prototype.reset = function () { this.history = []; this.turn = 0; };
+  Eco.Brain = Brain;
+})();
+ 
