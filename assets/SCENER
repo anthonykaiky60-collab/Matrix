@@ -1,0 +1,305 @@
+(function () {
+  'use strict';
+  var Eco = window.Eco = window.Eco || {};
+  var M4 = Eco.M4, Prog = Eco.Prog;
+ 
+  var HASH = [
+    'float hash11(float p){ p = fract(p*.1031); p *= p+33.33; p *= p+p; return fract(p); }',
+    'vec3 hash31(float p){ vec3 q = fract(vec3(p)*vec3(.1031,.1030,.0973)); q += dot(q,q.yzx+33.33); return fract((q.xxy+q.yzz)*q.zyx); }'
+  ].join('\n');
+ 
+  /* ---------------------------- ROSTO ---------------------------- */
+  var FACE_VS = '#version 300 es\nprecision highp float;\n' + HASH + '\n' +
+  'layout(location=0) in vec4 a0; layout(location=1) in vec4 a1; layout(location=2) in vec4 a2; layout(location=3) in vec4 a3;\n' +
+  'uniform mat4 uProj,uView,uModel; uniform float uTime,uPx,uLod,uCam,uDof;\n' +
+  'uniform float uOpen,uWide,uRound,uSmileL,uSmileR,uBrowL,uBrowR,uFurrow,uBlink,uSquint,uWiden;\n' +
+  'uniform vec2 uGaze; uniform float uAssemble,uDisperse,uThink,uFrag,uGlitch,uBright; uniform vec3 uTint;\n' +
+  'out vec3 vCol; out float vA;\n' +
+  'void main(){\n' +
+  ' vec3 p=a0.xyz; float tone=a0.w; float mU=a1.x,mL=a1.y,jaw=a1.z,cor=a1.w; float brow=a2.x,kind=a2.y,lid=a2.z,side=a2.w; float seed=a3.x,size=a3.y,edge=a3.z,iris=a3.w;\n' +
+  ' float alpha=0.16+0.42*tone;\n' +
+  ' if(kind>2.5){ /* interior da boca */\n' +
+  '   float w=mL; float yu=-0.41+0.02*uOpen, yl=-0.455-0.12*uOpen; p.y=mix(yu,yl,mU); alpha*=smoothstep(0.08,0.4,uOpen); p.x*=1.0+0.1*uWide-0.2*uRound;\n' +
+  ' } else {\n' +
+  '   float mm=clamp(mU+mL,0.,1.); p.x*=1.0+mm*(0.16*uWide-0.22*uRound);\n' +
+  '   p.y+=uOpen*0.02*mU-uOpen*0.12*jaw;\n' +
+  '   float sm=side<0.?uSmileL:uSmileR; p.y+=sm*0.055*cor;\n' +
+  '   float bR=side<0.?uBrowL:uBrowR; p.y+=bR*0.05*brow-uFurrow*0.03*brow; p.x-=side*uFurrow*0.018*brow;\n' +
+  '   p.y-=uBlink*0.065*lid+uSquint*0.022*lid; p.y+=uWiden*0.02*lid;\n' +
+  '   if(kind>0.5){ vec3 c=vec3(side*0.27,0.27,0.235); vec3 l=p-c; float yw=uGaze.x*0.55, pt=uGaze.y*0.45;\n' +
+  '     float cy=cos(yw),sy=sin(yw); l=vec3(l.x*cy+l.z*sy,l.y,-l.x*sy+l.z*cy); float cp=cos(pt),sp=sin(pt); l=vec3(l.x,l.y*cp-l.z*sp,l.y*sp+l.z*cp); p=c+l; alpha*=1.0-uBlink*0.92; }\n' +
+  ' }\n' +
+  ' /* fragmentação: faixas horizontais deslocadas + tremor orgânico */\n' +
+  ' float band=floor((p.y+1.2)*13.0); float tk=floor(uTime*0.7);\n' +
+  ' p.x+=(hash11(band*7.31+tk)-0.5)*0.035*uFrag*step(0.6,hash11(band*3.7+tk));\n' +
+  ' vec3 hj=hash31(seed*91.7)-0.5; float jit=0.004+0.012*edge+0.02*uThink+0.05*uGlitch;\n' +
+  ' p+=hj*jit*(0.6+0.4*sin(uTime*(1.5+seed*3.)+seed*40.));\n' +
+  ' p.x+=sin(uTime*1.3+seed*20.)*0.012*uThink; p.y+=cos(uTime*1.1+seed*17.)*0.01*uThink;\n' +
+  ' p.xy+=normalize(p.xy+vec2(1e-4))*edge*0.022*(0.5+0.5*sin(uTime*0.9+seed*30.));\n' +
+  ' /* materialização (início) e dispersão (final) */\n' +
+  ' float ta=clamp(uAssemble*1.5-seed*0.5,0.,1.); ta=1.-pow(1.-ta,3.);\n' +
+  ' vec3 sc=(hash31(seed*13.1+3.7)-0.5)*vec3(7.,5.,5.); p=mix(sc,p,ta);\n' +
+  ' float td=clamp(uDisperse*1.4-seed*0.4,0.,1.); td=td*td*(3.-2.*td);\n' +
+  ' float an=td*2.6; p.xz=vec2(p.x*cos(an)-p.z*sin(an),p.x*sin(an)+p.z*cos(an));\n' +
+  ' vec3 sd=(hash31(seed*29.3+1.9)-0.5)*vec3(13.,9.,8.); p=mix(p,sd,td);\n' +
+  ' vec4 vp=uView*uModel*vec4(p,1.0); gl_Position=uProj*vp; float dist=max(0.1,-vp.z);\n' +
+  ' float coc=abs(dist-uCam)/uCam;\n' +
+  ' gl_PointSize=clamp(max(0.9,size*(1.0+4.0*coc*uDof)/sqrt(uLod)*uPx/dist),1.0,48.0);\n' +
+  ' vec3 base=mix(vec3(0.58,0.6,0.63),vec3(1.0),tone);\n' +
+  ' float g=max(1.-ta,td); vCol=mix(base*uTint,vec3(0.12,1.0,0.42),g*0.9)*uBright;\n' +
+  ' vA=alpha/(1.0+8.0*coc*coc*uDof);\n' +
+  '}\n';
+  var POINT_FS = '#version 300 es\nprecision mediump float;\nin vec3 vCol; in float vA; out vec4 o;\n' +
+  'void main(){ vec2 d=gl_PointCoord-0.5; float r=length(d)*2.0; if(r>1.0) discard; o=vec4(vCol, vA*(1.0-r*r)); }\n';
+ 
+  /* --------------------------- CHUVA DE CÓDIGO ---------------------------- */
+  var RAIN_VS = '#version 300 es\nprecision highp float;\n' + HASH + '\n' +
+  'layout(location=0) in vec4 r0; layout(location=1) in vec2 r1;\n' +
+  'uniform mat4 uProj,uView; uniform float uTime,uPx,uCam,uRain,uDof,uMask,uAsp;\n' +
+  'out vec3 vCol; out float vA; out float vG;\n' +
+  'void main(){\n' +
+  ' float x=r0.x*min(1.0,uAsp/1.6),z=r0.y,seed=r0.z,speed=r0.w,idx=r1.x,len=r1.y; float range=14.0; /* em telas estreitas, a chuva se concentra no que é visível */\n' +
+  ' float head=mod(seed*range*3.0-uTime*speed*(0.35+0.9*uRain),range)-range*0.5; float y=head+idx*0.2;\n' +
+  ' vec4 vp=uView*vec4(x,y,z,1.0); gl_Position=uProj*vp; float dist=max(0.1,-vp.z); float coc=abs(dist-uCam)/uCam;\n' +
+  ' float t=idx/len; float b=pow(1.0-t,1.7);\n' +
+  ' vec3 col=mix(vec3(0.04,0.5,0.2),vec3(0.2,1.0,0.5),b); if(idx<0.5) col=vec3(0.82,1.0,0.9);\n' +
+  ' vCol=col; vG=floor(hash11(seed*57.0+floor(uTime*(2.0+seed*5.0)+idx*1.7)+idx*3.1)*64.0);\n' +
+  ' vec2 ndc=gl_Position.xy/gl_Position.w; float rr=length(vec2(ndc.x*uAsp*0.55,ndc.y*0.85));\n' +
+  ' float mask=mix(1.0,0.2+0.8*smoothstep(0.2,0.8,rr),uMask);\n' +
+  ' vA=b*(0.3+0.7*uRain)*mask*clamp(1.5-dist*0.09,0.25,1.0)/(1.0+1.2*coc*coc*uDof);\n' +
+  ' gl_PointSize=clamp(0.1*(1.0+2.0*coc*uDof)*uPx/dist,2.0,56.0);\n' +
+  '}\n';
+  var RAIN_FS = '#version 300 es\nprecision mediump float;\nin vec3 vCol; in float vA; in float vG; out vec4 o; uniform sampler2D uAtlas;\n' +
+  'void main(){ vec2 cell=vec2(mod(vG,8.0),floor(vG/8.0)); float a=texture(uAtlas,(cell+gl_PointCoord)/8.0).r; o=vec4(vCol,vA*a); }\n';
+ 
+  /* ------------------------------ POEIRA -------------------------------- */
+  var DUST_VS = '#version 300 es\nprecision highp float;\nlayout(location=0) in vec4 d0;\n' +
+  'uniform mat4 uProj,uView; uniform float uTime,uPx,uCam,uRain; out vec3 vCol; out float vA;\n' +
+  'void main(){ vec3 p=d0.xyz; float s=d0.w;\n' +
+  ' p.x+=sin(uTime*0.2+s*40.)*0.25; p.y=mod(p.y+uTime*0.06*(0.4+s)+4.0,8.0)-4.0; p.z+=cos(uTime*0.17+s*31.)*0.2;\n' +
+  ' vec4 vp=uView*vec4(p,1.0); gl_Position=uProj*vp; float dist=max(0.1,-vp.z); float coc=abs(dist-uCam)/uCam;\n' +
+  ' gl_PointSize=clamp((0.012+0.018*s)*(1.0+2.5*coc)*uPx/dist,1.0,24.0);\n' +
+  ' vCol=mix(vec3(0.75,0.8,0.78),vec3(0.2,1.0,0.5),step(0.6,s)*(0.4+0.5*uRain)); vA=(0.18+0.3*s)/(1.0+2.0*coc*coc);\n' +
+  '}\n';
+ 
+  /* ---------------------- FEIXES DE LUZ VOLUMÉTRICOS --------------------- */
+  var BEAM_VS = '#version 300 es\nprecision highp float;\nlayout(location=0) in vec2 q; uniform mat4 uProj,uView; out vec2 vP;\n' +
+  'void main(){ vP=q; gl_Position=uProj*uView*vec4(q.x*19.0,q.y*11.0,-9.5,1.0); }\n';
+  var BEAM_FS = '#version 300 es\nprecision highp float;\nin vec2 vP; out vec4 o; uniform float uTime,uLight; uniform vec3 uLightCol;\n' +
+  'void main(){ vec2 p=vP; vec2 src=vec2(-0.25,1.2); vec2 d=p-src; float an=atan(d.x,-d.y); float dist=length(d);\n' +
+  ' float n=sin(an*18.0+uTime*0.12)+sin(an*41.0-uTime*0.2)*0.6+sin(an*7.0+uTime*0.05)*0.8;\n' +
+  ' float rays=pow(max(0.0,n*0.3+0.4),3.0); float fall=exp(-dist*0.9);\n' +
+  ' vec2 c=p-vec2(0.0,0.05); float glow=exp(-dot(c,c)*2.2);\n' +
+  ' vec3 col=uLightCol*(rays*fall*0.30+glow*0.11)*uLight; o=vec4(col,1.0); }\n';
+ 
+  /* --------------------- COMPOSIÇÃO (modos de óculos) -------------------- */
+  var COMP_VS = '#version 300 es\nprecision highp float;\nout vec2 vUv;\nvoid main(){ vec2 p=vec2((gl_VertexID<<1)&2, gl_VertexID&2); vUv=p; gl_Position=vec4(p*2.0-1.0,0.,1.); }\n';
+  var COMP_FS = '#version 300 es\nprecision highp float;\nin vec2 vUv; out vec4 o;\n' +
+  'uniform sampler2D uL,uR; uniform int uMode; uniform float uTime,uGlitch,uH,uFlash;\n' +
+  'vec3 samp(sampler2D t, vec2 uv){\n' +
+  ' float band=floor(uv.y*28.0); float h=fract(sin(band*12.9898+floor(uTime*14.0)*78.233)*43758.5453);\n' +
+  ' float sh=step(0.86,h)*(h-0.93)*0.35*uGlitch; vec2 u=vec2(uv.x+sh,uv.y);\n' +
+  ' float ab=0.0012+0.012*uGlitch*step(0.8,h);\n' +
+  ' vec3 c=vec3(texture(t,u+vec2(ab,0.)).r,texture(t,u).g,texture(t,u-vec2(ab,0.)).b);\n' +
+  ' c+=(fract(sin(dot(uv+uTime,vec2(12.9,78.2)))*43758.5)-0.5)*0.06*uGlitch; return c; }\n' +
+  'void main(){ vec2 uv=vUv; vec3 c;\n' +
+  ' if(uMode==0){ c=samp(uL,uv); }\n' +
+  ' else if(uMode==1){ vec3 L=samp(uL,uv),R=samp(uR,uv);\n' +
+  '   c=vec3(dot(L,vec3(.456,.5,.176))+dot(R,vec3(-.043,-.088,-.002)), dot(L,vec3(-.04,-.038,-.016))+dot(R,vec3(.378,.734,-.018)), dot(L,vec3(-.015,-.021,-.005))+dot(R,vec3(-.072,-.113,1.226))); }\n' +
+  ' else if(uMode==2){ c=uv.x<0.5?samp(uL,vec2(uv.x*2.,uv.y)):samp(uR,vec2((uv.x-0.5)*2.,uv.y)); }\n' +
+  ' else if(uMode==3){ c=uv.y>0.5?samp(uL,vec2(uv.x,(uv.y-0.5)*2.)):samp(uR,vec2(uv.x,uv.y*2.)); }\n' +
+  ' else { float row=floor(uH-gl_FragCoord.y); c=mod(row,2.0)<1.0?texture(uL,uv).rgb:texture(uR,uv).rgb; }\n' +
+  ' if(uMode<2){ vec2 q=uv-0.5; c*=1.0-dot(q,q)*0.9; }\n' +
+  ' c+=uFlash; o=vec4(clamp(c,0.,1.),1.); }\n';
+ 
+  var MODES = { off: 0, anaglyph: 1, sbs: 2, tab: 3, interlaced: 4 };
+ 
+  function Scene(canvas, opts) {
+    opts = opts || {};
+    this.canvas = canvas; this.ok = false; this.t = 0;
+    var gl = this.gl = canvas.getContext('webgl2', { antialias: false, alpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: !!opts.preserve });
+    if (!gl) return;
+    try { this._init(opts); this.ok = true; } catch (e) { console.error('[Eco] WebGL init', e); this.error = e; }
+  }
+ 
+  Scene.prototype._init = function (opts) {
+    var gl = this.gl, mobile = opts.mobile;
+    this.persona = new Eco.Persona();
+    this.stereo = { mode: 'off', depth: 1, swap: false };
+    this.lod = mobile ? 0.55 : 1; this.dprCap = mobile ? 1.25 : 1.75; this.auto = true;
+    this.assemble = 0; this.disperse = 0; this.finaleT = -1; this.glitchV = 0; this.flash = 0;
+    this.rain = 0.45; this.rainTarget = 0.45; this.reduced = !!opts.reducedMotion;
+    this.fov = 38 * Math.PI / 180; this.camZ = 3.5; this.frameAvg = 16; this.slow = 0; this.fast = 0;
+ 
+    this.pFace = new Prog(gl, FACE_VS, POINT_FS, 'face');
+    this.pRain = new Prog(gl, RAIN_VS, RAIN_FS, 'rain');
+    this.pDust = new Prog(gl, DUST_VS, POINT_FS, 'dust');
+    this.pBeam = new Prog(gl, BEAM_VS, '#version 300 es\n' + BEAM_FS.split('\n').slice(1).join('\n'), 'beam');
+    this.pComp = new Prog(gl, COMP_VS, COMP_FS, 'comp');
+ 
+    /* rosto */
+    var face = Eco.buildFace(mobile ? 26000 : 52000, 7); this.faceCount = face.count;
+    this.vaoFace = this._vao(face.data, [[0, 4], [1, 4], [2, 4], [3, 4]], 64);
+ 
+    /* chuva: colunas em 3 faixas de profundidade */
+    var NC = mobile ? 110 : 230, L = 16, R = new Float32Array(NC * L * 6), i, j, o = 0;
+    for (i = 0; i < NC; i++) {
+      var front = Math.random() < 0.12, z = front ? 0.6 + Math.random() * 1.2 : -(1.4 + Math.pow(Math.random(), 0.8) * 7);
+      var span = (this.camZ - z) * 0.95, x = (Math.random() * 2 - 1) * span;
+      if (front && Math.abs(x) < 1.0) x = (x < 0 ? -1 : 1) * (1.0 + Math.random());
+      var seed = Math.random(), speed = 0.7 + Math.random() * 1.6;
+      for (j = 0; j < L; j++) { R[o++] = x; R[o++] = z; R[o++] = seed; R[o++] = speed; R[o++] = j; R[o++] = L; }
+    }
+    this.rainCount = NC * L; this.vaoRain = this._vao(R, [[0, 4], [1, 2]], 24);
+ 
+    /* poeira */
+    var ND = mobile ? 350 : 800, D = new Float32Array(ND * 4);
+    for (i = 0; i < ND; i++) { D[i * 4] = (Math.random() * 2 - 1) * 5; D[i * 4 + 1] = (Math.random() * 2 - 1) * 4; D[i * 4 + 2] = -3 + Math.random() * 5; D[i * 4 + 3] = Math.random(); }
+    this.dustCount = ND; this.vaoDust = this._vao(D, [[0, 4]], 16);
+ 
+    /* quad dos feixes + VAO vazio para o passe de composição */
+    this.vaoBeam = this._vao(new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), [[0, 2]], 8);
+    this.vaoEmpty = gl.createVertexArray();
+ 
+    /* atlas de glifos 8x8 (katakana meia-largura, dígitos, símbolos) */
+    var cv = document.createElement('canvas'); cv.width = cv.height = 512;
+    var cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.font = 'bold 46px "MS Gothic","Hiragino Kaku Gothic Pro","Noto Sans Mono CJK JP",monospace';
+    cx.textAlign = 'center'; cx.textBaseline = 'middle';
+    var chars = []; for (i = 0xFF71; i <= 0xFF9D; i++) chars.push(String.fromCharCode(i));
+    chars = chars.concat('0123456789:.=*+-<>Z'.split('')).slice(0, 64);
+    chars.forEach(function (ch, k) { cx.fillText(ch, (k % 8) * 64 + 32, ((k / 8) | 0) * 64 + 34); });
+    this.atlas = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, this.atlas);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, cv);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+ 
+    this.rts = [null, null]; this.resize();
+  };
+ 
+  Scene.prototype._vao = function (data, attrs, stride) {
+    var gl = this.gl, vao = gl.createVertexArray(), buf = gl.createBuffer();
+    gl.bindVertexArray(vao); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+    var off = 0;
+    attrs.forEach(function (a) { gl.enableVertexAttribArray(a[0]); gl.vertexAttribPointer(a[0], a[1], gl.FLOAT, false, stride, off); off += a[1] * 4; });
+    gl.bindVertexArray(null); return vao;
+  };
+ 
+  /* ---- API pública ---- */
+  Scene.prototype.setStereo = function (s) { Object.assign(this.stereo, s); this.resize(true); };
+  /* Enquadramento: o rosto ocupa só a área livre acima da interface (legendas/controles),
+     em qualquer proporção de tela. uiFrac = fração da altura coberta pela interface. */
+  Scene.prototype.setFraming = function (uiFrac) {
+    this.uiFrac = uiFrac; var visH = 2 * this.camZ * Math.tan(this.fov / 2), top = 0.08;
+    var avail = Math.max(0.35, 1 - uiFrac - top), s = Math.min(0.95, visH * avail / 2.05);
+    s = Math.min(s, visH * this.aspect * 0.8 / 1.4);
+    var yTop = visH * (0.5 - top), yBot = yTop - visH * avail;
+    this.frame = { s: s, y: (yTop + yBot) / 2 + 0.08 * s };
+  };
+  Scene.prototype.setLod = function (v) { this.lod = Math.max(0.35, Math.min(1, v)); };
+  Scene.prototype.glitch = function (v, ms) { this.glitchV = Math.max(this.glitchV, this.reduced ? v * 0.3 : v); this.glitchHold = (ms || 250) / 1000; };
+  Scene.prototype.startAssemble = function () { this.assemble = 0; this.assembling = true; this.glitch(0.9, 700); };
+  Scene.prototype.startFinale = function () { this.finaleT = 0; this.persona.setState('finale'); this.rainTarget = 1; this.glitch(1, 600); };
+ 
+  Scene.prototype.resize = function (force) {
+    if (!this.ok) return;
+    var c = this.canvas, mode = this.stereo.mode;
+    var native = window.devicePixelRatio || 1, dpr = mode === 'interlaced' ? native : Math.min(native, this.dprCap);
+    var w = Math.max(2, Math.round(c.clientWidth * dpr)), h = Math.max(2, Math.round(c.clientHeight * dpr));
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    this.W = w; this.H = h; this.aspect = w / h;
+    this.camZ = Math.max(3.5, 2.7 / this.aspect); this.setFraming(this.uiFrac || 0.3);
+    /* tamanho do RT por olho: SBS/TAB guardam metade da resolução */
+    var rw = mode === 'sbs' ? Math.max(2, w >> 1) : w, rh = mode === 'tab' ? Math.max(2, h >> 1) : h, n = mode === 'off' ? 1 : 2;
+    for (var i = 0; i < 2; i++) {
+      var need = i < n, rt = this.rts[i];
+      if (!need) { if (rt) { Eco.freeRT(this.gl, rt); this.rts[i] = null; } continue; }
+      if (!rt || rt.w !== rw || rt.h !== rh) { Eco.freeRT(this.gl, rt); this.rts[i] = Eco.makeRT(this.gl, rw, rh); }
+    }
+  };
+ 
+  /* ---- animação ---- */
+  Scene.prototype.update = function (dt, drive) {
+    this.t += dt; var P = this.persona;
+    drive = drive || {};
+    drive.finale = this.finaleT >= 0 ? Math.min(1, this.finaleT / 5) : 0;
+    P.update(dt, this.t, drive);
+    if (this.assembling) { this.assemble = Math.min(1, this.assemble + dt / 3.4); if (this.assemble >= 1) this.assembling = false; }
+    if (this.finaleT >= 0) { this.finaleT += dt; this.disperse = Math.min(1, this.finaleT / 5.5); if (Math.random() < dt * 2) this.glitch(0.5, 150); }
+    /* chuva reage ao estado */
+    var rt = this.finaleT >= 0 ? 1 : ({ idle: .4, listening: .35, thinking: .75, speaking: .5 }[P.state] || .45);
+    this.rainTarget = rt; this.rain += (this.rainTarget - this.rain) * (1 - Math.exp(-1.5 * dt));
+    /* glitch: decai; microglitch ocasional */
+    if (this.glitchHold > 0) this.glitchHold -= dt; else this.glitchV *= Math.exp(-6 * dt);
+    if (!this.reduced && this.finaleT < 0 && Math.random() < dt / 9) this.glitch(0.18, 110);
+    this.flash *= Math.exp(-5 * dt);
+    /* qualidade automática (LOD) com base no tempo médio de quadro */
+    this.frameAvg += (dt * 1000 - this.frameAvg) * 0.05;
+    if (this.auto) {
+      if (this.frameAvg > 25) { if (++this.slow > 80) { this.slow = 0; if (this.lod > 0.4) this.setLod(this.lod * 0.85); else if (this.dprCap > 1) { this.dprCap = 1; this.resize(true); } } } else this.slow = 0;
+      if (this.frameAvg < 13.5 && this.lod < 1) { if (++this.fast > 400) { this.fast = 0; this.setLod(this.lod * 1.1); } } else this.fast = 0;
+    }
+  };
+ 
+  Scene.prototype._world = function (eyeX, conv, rtH, mat) {
+    var gl = this.gl, P = this.persona, t = this.t, self = this;
+    var proj = M4.persp(this.fov, this.aspect, 0.1, 60, eyeX, conv), view = M4.translate(-eyeX, 0, -this.camZ);
+    var uPx = rtH / (2 * Math.tan(this.fov / 2)), dofK = 1;
+    var model = M4.mul(M4.translate(0, this.frame.y - this.disperse * 0.1, P.z), M4.mul(M4.rotY(P.yaw), M4.mul(M4.rotX(P.pitch), M4.mul(M4.rotZ(P.roll), M4.scale(this.frame.s)))));
+    gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+ 
+    /* 1) feixes volumétricos */
+    var lg = 0.55 + 0.35 * P.bright, gk = this.finaleT >= 0 ? [0.1, 0.9, 0.4] : [0.25 * P.tint[0] + 0.1, 0.55 * P.tint[1] + 0.2, 0.4 * P.tint[2] + 0.1];
+    this.pBeam.use(); this.pBeam.set('uProj', proj); this.pBeam.set('uView', view); this.pBeam.set('uTime', t); this.pBeam.set('uLight', lg); this.pBeam.set('uLightCol', gk);
+    gl.bindVertexArray(this.vaoBeam); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+ 
+    /* 2) chuva (textura de glifos) */
+    var rp = this.pRain.use(); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.atlas); rp.seti('uAtlas', 0);
+    rp.set('uProj', proj); rp.set('uView', view); rp.set('uTime', t); rp.set('uPx', uPx); rp.set('uCam', this.camZ); rp.set('uRain', this.rain);
+    rp.set('uDof', dofK); rp.set('uMask', this.finaleT >= 0 ? Math.max(0, 1 - this.finaleT / 2) : 1); rp.set('uAsp', this.aspect);
+    gl.bindVertexArray(this.vaoRain); gl.drawArrays(gl.POINTS, 0, Math.floor(this.rainCount * Math.max(0.5, this.lod)));
+ 
+    /* 3) poeira digital */
+    var dp = this.pDust.use(); dp.set('uProj', proj); dp.set('uView', view); dp.set('uTime', t); dp.set('uPx', uPx); dp.set('uCam', this.camZ); dp.set('uRain', this.rain);
+    gl.bindVertexArray(this.vaoDust); gl.drawArrays(gl.POINTS, 0, Math.floor(this.dustCount * Math.max(0.5, this.lod)));
+ 
+    /* 4) rosto */
+    var f = this.pFace.use(), m = P.mouth, c = P.cur;
+    f.set('uProj', proj); f.set('uView', view); f.set('uModel', model); f.set('uTime', t); f.set('uPx', uPx); f.set('uLod', this.lod); f.set('uCam', this.camZ); f.set('uDof', dofK);
+    f.set('uOpen', m.open); f.set('uWide', m.wide); f.set('uRound', m.round);
+    f.set('uSmileL', c.smileL); f.set('uSmileR', c.smileR); f.set('uBrowL', c.browL); f.set('uBrowR', c.browR); f.set('uFurrow', c.furrow);
+    f.set('uBlink', P.blink); f.set('uSquint', c.squint); f.set('uWiden', c.widen); f.set('uGaze', P.gaze);
+    f.set('uAssemble', this.assemble); f.set('uDisperse', this.disperse); f.set('uThink', P.think); f.set('uFrag', 0.35 + this.glitchV * 1.5 + this.disperse);
+    f.set('uGlitch', this.glitchV); f.set('uBright', P.bright); f.set('uTint', P.tint);
+    gl.bindVertexArray(this.vaoFace); gl.drawArrays(gl.POINTS, 0, Math.floor(this.faceCount * this.lod));
+  };
+ 
+  Scene.prototype.render = function () {
+    if (!this.ok) return;
+    var gl = this.gl, st = this.stereo, mode = MODES[st.mode] || 0, i;
+    var sep = 0.16 * st.depth, conv = this.camZ + 0.55;
+    var eyes = mode === 0 ? [0] : [-sep / 2, sep / 2];
+    for (i = 0; i < eyes.length; i++) {
+      var rt = this.rts[i]; gl.bindFramebuffer(gl.FRAMEBUFFER, rt.fbo); gl.viewport(0, 0, rt.w, rt.h);
+      gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+      this._world(eyes[i], conv, rt.h);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, this.W, this.H); gl.disable(gl.BLEND);
+    var cp = this.pComp.use(), L = this.rts[0], R = this.rts[1] || this.rts[0];
+    if (st.swap && mode !== 0) { var tmp = L; L = R; R = tmp; }
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, L.tex); cp.seti('uL', 0);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, R.tex); cp.seti('uR', 1);
+    cp.seti('uMode', mode); cp.set('uTime', this.t); cp.set('uGlitch', this.glitchV); cp.set('uH', this.H); cp.set('uFlash', this.flash);
+    gl.bindVertexArray(this.vaoEmpty); gl.drawArrays(gl.TRIANGLES, 0, 3);
+  };
+ 
+  Scene.prototype.dispose = function () {
+    if (!this.ok) return; var gl = this.gl;
+    this.rts.forEach(function (r) { Eco.freeRT(gl, r); });
+    var ext = gl.getExtension('WEBGL_lose_context'); if (ext) ext.loseContext();
+    this.ok = false;
+  };
+ 
+  Eco.Scene = Scene; Eco.STEREO_MODES = MODES;
+})();
+ 
