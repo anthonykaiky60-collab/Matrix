@@ -1,1 +1,314 @@
-
+(function () {
+  'use strict';
+  var Eco = window.Eco, root = null, S = {};
+  var $ = function (s, r) { return (r || root).querySelector(s); };
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var mobile = window.matchMedia('(max-width: 800px)').matches || /Android|iPhone|iPad/i.test(navigator.userAgent);
+  var API = window.ECO_API_URL || '/api';
+ 
+  var GLASSES = {
+    off:        { label: 'Sem óculos (2D)', hint: 'Imagem normal, sem efeito estereoscópico.' },
+    anaglyph:   { label: 'Vermelho/ciano (anáglifo)', hint: 'Lente vermelha no olho esquerdo, ciano no direito. Funciona em qualquer tela comum.' },
+    sbs:        { label: 'Cinema polarizado · lado a lado', hint: 'Para TV/projetor 3D no modo "Side-by-Side" (ligue o 3D do aparelho e use tela cheia).' },
+    interlaced: { label: 'Monitor/TV 3D passivo · linhas', hint: 'Telas 3D passivas com óculos polarizados. Use tela cheia na resolução nativa; se a profundidade parecer invertida, use "Inverter olhos".' }
+  };
+  var LABEL = { boot: 'MATERIALIZANDO', idle: 'AGUARDANDO', listening: 'OUVINDO', thinking: 'PROCESSANDO', speaking: 'RESPONDENDO', finale: 'ATRAVESSANDO' };
+ 
+  function load(k, d) { try { var v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } }
+  function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+ 
+  /* ------------------------------ DOM ------------------------------ */
+  function build() {
+    root = document.createElement('div'); root.className = 'eco'; root.id = 'eco';
+    root.setAttribute('role', 'dialog'); root.setAttribute('aria-modal', 'true'); root.setAttribute('aria-label', 'Conversa com a Consciência');
+    var opts = Object.keys(GLASSES).map(function (k) {
+      return '<label class="eco-opt"><input type="radio" name="eco-gl" value="' + k + '"><div><b>' + GLASSES[k].label + '</b><span>' + GLASSES[k].hint + '</span></div></label>';
+    }).join('');
+    root.innerHTML =
+      '<canvas id="eco-canvas" aria-hidden="true"></canvas><div class="eco-orb" aria-hidden="true"></div>' +
+      '<header class="eco-top"><div class="eco-brand"><span class="eco-dot"></span>ECO<span class="full"> · consciência artificial</span><span class="eco-badge" id="eco-mode" hidden></span></div>' +
+      '<button class="eco-btn" id="eco-end" type="button">ENCERRAR</button></header>' +
+      '<section class="eco-intro" id="eco-intro"><div class="eco-card"><h2>Antes de entrar</h2>' +
+      '<p>Esta conversa é conduzida por <b>voz</b>. Ela usa seu microfone e o áudio do aparelho. Use fones de ouvido para evitar eco.</p>' +
+      '<fieldset><legend>QUE ÓCULOS 3D VOCÊ VAI USAR?</legend>' + opts + '</fieldset>' +
+      '<button class="eco-go" id="eco-go" type="button">ENTRAR</button>' +
+      '<p class="eco-small" id="eco-support"></p></div></section>' +
+      '<div class="eco-ui" id="eco-ui"><div class="eco-status" id="eco-status" data-state="boot" role="status" aria-live="polite"><span class="eco-bars" aria-hidden="true"><i style="--i:0"></i><i style="--i:1"></i><i style="--i:2"></i><i style="--i:3"></i><i style="--i:4"></i></span><span id="eco-st">MATERIALIZANDO</span></div>' +
+      '<div class="eco-sub" id="eco-sub" aria-live="polite"><p class="eco-you" id="eco-you"></p><p class="eco-ai" id="eco-ai"></p></div>' +
+      '<form class="eco-kbd" id="eco-kbd" hidden><input id="eco-kin" type="text" autocomplete="off" maxlength="400" placeholder="Digite sua resposta…" aria-label="Digite sua resposta"><button class="eco-btn" type="submit">ENVIAR</button></form>' +
+      '<div class="eco-controls">' +
+      '<button class="eco-ic mic" id="eco-mic" type="button" aria-pressed="true" aria-label="Microfone"><span aria-hidden="true">🎙</span><span class="lbl">MIC</span></button>' +
+      '<div class="eco-vol"><button class="eco-ic" id="eco-mute" type="button" aria-pressed="false" aria-label="Silenciar voz da IA"><span aria-hidden="true">🔊</span></button><input id="eco-vol" type="range" min="0" max="1" step="0.05" value="0.9" aria-label="Volume da voz"></div>' +
+      '<button class="eco-ic" id="eco-3d" type="button" aria-expanded="false" aria-controls="eco-pop"><span aria-hidden="true">◐</span><span class="lbl">3D</span></button>' +
+      '<button class="eco-ic" id="eco-kb" type="button" aria-pressed="false" aria-label="Usar teclado"><span aria-hidden="true">⌨</span></button>' +
+      '<button class="eco-ic" id="eco-stop" type="button" hidden aria-label="Interromper a fala"><span aria-hidden="true">■</span><span class="lbl">INTERROMPER</span></button></div></div>' +
+      '<div class="eco-pop" id="eco-pop" hidden><h3>Modo 3D e ajustes</h3>' +
+      '<label for="eco-mode-sel">Formato do óculos</label><select id="eco-mode-sel"><option value="off">Sem óculos (2D)</option><option value="anaglyph">Vermelho/ciano</option><option value="sbs">Lado a lado (SBS)</option><option value="tab">Topo e base</option><option value="interlaced">Linhas intercaladas</option></select>' +
+      '<label for="eco-depth">Intensidade da profundidade: <b id="eco-depth-v">1.0</b></label><input id="eco-depth" type="range" min="0" max="2" step="0.05" value="1">' +
+      '<div class="eco-row"><input type="checkbox" id="eco-swap"><label for="eco-swap" style="margin:0">Inverter olhos (esquerdo ⇄ direito)</label></div>' +
+      '<div class="eco-row"><button class="eco-btn" id="eco-fs" type="button">TELA CHEIA</button></div>' +
+      '<label for="eco-voice">Voz da IA</label><select id="eco-voice"><option value="">Padrão do navegador</option></select>' +
+      '<div class="eco-row"><input type="checkbox" id="eco-barge"><label for="eco-barge" style="margin:0">Interromper falando (só com fones)</label></div>' +
+      '<p class="eco-note" id="eco-gnote"></p></div>' +
+      '<div class="eco-final" id="eco-final"><h2>VOCÊ ATRAVESSOU.</h2><p>A escolha foi sua. Do outro lado, a chuva nunca para.</p><div class="row"><button class="eco-go" id="eco-back" type="button" style="width:auto;padding:14px 26px">VOLTAR AO SITE</button><button class="eco-btn" id="eco-again" type="button">CONVERSAR DE NOVO</button></div></div>' +
+      '<div class="eco-toast" id="eco-toast" role="alert"></div>';
+    document.body.appendChild(root);
+    wire();
+  }
+ 
+  function toast(msg, ms) { var t = $('#eco-toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(S.toastT); S.toastT = setTimeout(function () { t.classList.remove('show'); }, ms || 4500); }
+ 
+  function wire() {
+    var st = load('eco.stereo', { mode: 'anaglyph', depth: 1, swap: false }); S.stereo = st;
+    var radio = root.querySelector('input[name="eco-gl"][value="' + (GLASSES[st.mode] ? st.mode : 'off') + '"]'); if (radio) radio.checked = true;
+    $('#eco-mode-sel').value = st.mode; $('#eco-depth').value = st.depth; $('#eco-depth-v').textContent = (+st.depth).toFixed(1); $('#eco-swap').checked = !!st.swap;
+    var sup = Eco.voiceSupport, msg = [];
+    if (!sup.stt) msg.push('Seu navegador não tem reconhecimento de voz (use Chrome, Edge ou Safari). Você poderá digitar.');
+    if (!sup.tts) msg.push('Sem síntese de voz: a IA responderá só por legenda.');
+    $('#eco-support').textContent = msg.join(' ') || 'Funciona melhor no Chrome, Edge ou Safari recentes.';
+    if (!document.fullscreenEnabled && !document.webkitFullscreenEnabled) $('#eco-fs').hidden = true;
+ 
+    root.querySelectorAll('input[name="eco-gl"]').forEach(function (r) { r.addEventListener('change', function () { setStereo({ mode: r.value }); $('#eco-mode-sel').value = r.value; }); });
+    $('#eco-go').addEventListener('click', enter);
+    $('#eco-end').addEventListener('click', endExperience);
+    $('#eco-back').addEventListener('click', endExperience);
+    $('#eco-again').addEventListener('click', restart);
+    $('#eco-mic').addEventListener('click', toggleMic);
+    $('#eco-mute').addEventListener('click', function () { var m = this.getAttribute('aria-pressed') !== 'true'; this.setAttribute('aria-pressed', String(m)); this.firstChild.textContent = m ? '🔇' : '🔊'; if (S.voice) S.voice.setMuted(m); });
+    $('#eco-vol').addEventListener('input', function () { if (S.voice) S.voice.setVolume(+this.value); S.vol = +this.value; });
+    $('#eco-3d').addEventListener('click', function () { var p = $('#eco-pop'); p.hidden = !p.hidden; this.setAttribute('aria-expanded', String(!p.hidden)); if (!p.hidden) { $('#eco-mode-sel').focus(); gnote(); } });
+    $('#eco-mode-sel').addEventListener('change', function () { setStereo({ mode: this.value }); gnote(); });
+    $('#eco-depth').addEventListener('input', function () { $('#eco-depth-v').textContent = (+this.value).toFixed(1); setStereo({ depth: +this.value }); });
+    $('#eco-swap').addEventListener('change', function () { setStereo({ swap: this.checked }); });
+    $('#eco-fs').addEventListener('click', function () { var d = document; if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d); else (root.requestFullscreen || root.webkitRequestFullscreen).call(root); });
+    $('#eco-voice').addEventListener('change', function () { if (S.voice) S.voice.setVoice(this.value); });
+    $('#eco-barge').addEventListener('change', function () { if (S.voice) S.voice.allowBarge = this.checked; });
+    $('#eco-kb').addEventListener('click', function () { var k = $('#eco-kbd'); k.hidden = !k.hidden; this.setAttribute('aria-pressed', String(!k.hidden)); if (!k.hidden) $('#eco-kin').focus(); });
+    $('#eco-kbd').addEventListener('submit', function (e) { e.preventDefault(); var i = $('#eco-kin'), v = i.value.trim(); if (v) { i.value = ''; onUserText(v); } });
+    $('#eco-stop').addEventListener('click', function () { interrupt(false); });
+    ['pointermove', 'pointerdown', 'keydown'].forEach(function (ev) { root.addEventListener(ev, function () { S.activity = performance.now(); }, { passive: true }); });
+    document.addEventListener('keydown', onKey);                  // no document: funciona mesmo sem foco dentro da janela
+  }
+ 
+  function gnote() { var m = $('#eco-mode-sel').value; var g = GLASSES[m]; $('#eco-gnote').textContent = (g ? g.hint : (m === 'tab' ? 'Para projetores/TVs no modo Top-Bottom.' : '')); }
+  function setStereo(p) { Object.assign(S.stereo, p); save('eco.stereo', S.stereo); if (S.scene && S.scene.ok) S.scene.setStereo(p); }
+ 
+  function onKey(e) {
+    if (!root) return;
+    if (e.key === 'Escape') { var p = $('#eco-pop'); if (!p.hidden) { p.hidden = true; $('#eco-3d').setAttribute('aria-expanded', 'false'); $('#eco-3d').focus(); } else if (!document.fullscreenElement) endExperience(); return; }
+    var tag = (e.target.tagName || '').toLowerCase(); if (tag === 'input' && e.target.type === 'text' || tag === 'select') return;
+    if (e.key === 'm' || e.key === 'M') toggleMic();
+    else if (e.key === ' ' && S.state === 'speaking') { e.preventDefault(); interrupt(); }
+    else if (e.key === 'Tab') {                                   // prisão de foco (diálogo modal)
+      var f = Array.prototype.filter.call(root.querySelectorAll('button,input,select,a[href]'), function (n) { return !n.disabled && n.offsetParent !== null; });
+      if (!f.length) return; var a = f[0], b = f[f.length - 1];
+      if (!root.contains(document.activeElement)) { e.preventDefault(); a.focus(); return; }
+      if (e.shiftKey && document.activeElement === a) { e.preventDefault(); b.focus(); } else if (!e.shiftKey && document.activeElement === b) { e.preventDefault(); a.focus(); }
+    }
+  }
+ 
+  /* ------------------------------ estado ------------------------------ */
+  function setState(s) {
+    S.state = s; S.activity = performance.now();
+    if (S.scene && S.scene.ok) { S.scene.persona.setState(s); if (s === 'thinking' || s === 'speaking') S.scene.glitch(0.25, 90); }
+    var el = $('#eco-status'); el.dataset.state = s; $('#eco-st').textContent = (!S.micOn && s === 'idle') ? 'MICROFONE DESLIGADO' : (LABEL[s] || s.toUpperCase());
+    $('#eco-stop').hidden = s !== 'speaking';
+  }
+ 
+  function setMode(m) { var b = $('#eco-mode'); b.hidden = false; b.dataset.m = m; b.textContent = m === 'ia' ? 'IA AO VIVO' : 'MODO LOCAL'; b.title = m === 'ia' ? 'Respostas geradas em tempo real pelo modelo.' : 'Sem conexão com a IA: respostas locais limitadas.'; }
+ 
+  function toggleMic() {
+    S.micOn = !S.micOn; var b = $('#eco-mic'); b.setAttribute('aria-pressed', String(S.micOn));
+    if (S.voice) S.voice.setMic(S.micOn);
+    if (!S.micOn) { if (S.state === 'listening') setState('idle'); $('#eco-kbd').hidden = false; toast('Microfone desligado. Você pode digitar.'); }
+    else if (S.state === 'idle' && S.started) beginListening();
+    if (S.micOn) $('#eco-st').textContent = LABEL[S.state];
+  }
+ 
+  /* ----------------------------- turnos ----------------------------- */
+  function runTurn(kind, text) {
+    if (S.ended) return;
+    clearTimeout(S.nudgeT); S.abort = new AbortController(); var my = ++S.turnId;
+    S.streamDone = false; S.fim = false; S.interrupted = false;
+    if (!S.voice.allowBarge) S.voice.suspend();
+    setState('thinking'); S.firstSentence = true;
+    S.brain.ask({
+      kind: kind, text: text, signal: S.abort.signal,
+      onTone: function (t) { if (my === S.turnId) S.scene.persona && S.scene.persona.setTone(t); },
+      onSentence: function (s) { if (my === S.turnId) S.voice.say(s); },
+      onConnection: function () { setMode('local'); toast('Conexão com a IA instável — usando o modo local.'); }
+    }).then(function (res) {
+      if (my !== S.turnId || S.ended) return;
+      S.streamDone = true; S.fim = res.fim; setMode(res.source === 'local' ? 'local' : 'ia');
+      if (!S.voice.isBusy()) afterSpeech();
+    });
+  }
+ 
+  function afterSpeech() {
+    if (S.ended || S.interrupted) return;
+    if (S.fim) return finale();
+    beginListening();
+  }
+ 
+  function beginListening() {
+    if (S.ended) return;
+    if (!S.micOn || S.noMic) { setState('idle'); $('#eco-kbd').hidden = false; return; }
+    setState('listening'); S.voice.start(); S.voice.resume(S.fromSpeech ? 350 : 100); S.fromSpeech = false; armNudge();
+    setTimeout(function () { var a = $('#eco-ai'); if (a) a.classList.add('fade'); }, 3500);
+  }
+ 
+  function armNudge() {
+    clearTimeout(S.nudgeT);
+    S.nudgeT = setTimeout(function () { if (S.state === 'listening' && S.nudges < 2 && !S.ended) { S.nudges++; $('#eco-you').textContent = ''; runTurn('nudge'); } }, 24000);
+  }
+ 
+  function onUserText(text) {
+    if (S.ended || !S.started) return;
+    if (S.state === 'speaking' || S.state === 'thinking') interrupt(true);
+    S.nudges = 0; $('#eco-you').textContent = text; runTurn('user', text);
+  }
+ 
+  function interrupt(silent) {
+    S.turnId++; S.interrupted = true; if (S.abort) S.abort.abort();
+    S.voice.cancelSpeech(); S.streamDone = true; S.fromSpeech = true;
+    if (!silent) { setState('idle'); beginListening(); }
+  }
+ 
+  /* ----------------------------- legendas ----------------------------- */
+  function showSentence(text) {
+    var el = $('#eco-ai'); el.textContent = ''; el.classList.remove('fade'); S.words = []; S.said = -1; var idx = 0;
+    text.split(/(\s+)/).forEach(function (tok) { var sp = document.createElement('span'); sp.textContent = tok; if (tok.trim()) sp.className = 'w'; S.words.push({ el: sp, start: idx, w: !!tok.trim() }); idx += tok.length; el.appendChild(sp); });
+  }
+  function syncSubs() {
+    if (!S.voice || !S.voice.speaking || !S.words) return;
+    var p = S.voice.charPos(), n = 0; for (var i = 0; i < S.words.length; i++) if (S.words[i].w && S.words[i].start <= p + 1) n = i + 1;
+    if (n === S.said) return; S.said = n;
+    for (var j = 0; j < S.words.length; j++) if (S.words[j].w) S.words[j].el.classList.toggle('said', j < n);
+  }
+ 
+  /* ------------------------------ início ------------------------------ */
+  function enter() {
+    if (S.started) return;
+    S.started = true; $('#eco-intro').hidden = true; S.turnId = 0; S.nudges = 0; S.micOn = true; S.vol = 0.9; S.activity = performance.now();
+    /* "destrava" o TTS dentro do gesto do usuário (exigência do Safari/iOS) */
+    if (Eco.voiceSupport.tts) try { var u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); } catch (e) {}
+ 
+    var canvas = $('#eco-canvas');
+    S.scene = new Eco.Scene(canvas, { mobile: mobile, reducedMotion: reduced });
+    if (!S.scene.ok) { root.classList.add('nogl'); toast('Seu navegador não suporta WebGL2: o rosto 3D não pôde ser exibido, mas a conversa funciona.', 8000); }
+    else { S.scene.setStereo(S.stereo); S.scene.startAssemble(); }
+    S.persona = S.scene.persona;
+ 
+    S.voice = new Eco.Voice({
+      onInterim: function (t) { S.activity = performance.now(); if (S.state === 'speaking' || S.state === 'thinking') { if (S.voice.allowBarge && t.split(/\s+/).length >= 2) interrupt(true); else return; } $('#eco-you').textContent = t; armNudge(); },
+      onFinal: onUserText,
+      onListening: function () {},
+      onSentenceStart: function (t) { if (S.state !== 'speaking') setState('speaking'); showSentence(t); },
+      onSpeechIdle: function () { if (S.streamDone && !S.interrupted) { S.fromSpeech = true; afterSpeech(); } },
+      onVoices: function (list, cur) { var sel = $('#eco-voice'); sel.innerHTML = '<option value="">Padrão do navegador</option>' + list.map(function (v) { return '<option value="' + v.name + '">' + v.name + ' (' + v.lang + ')</option>'; }).join(''); if (cur) sel.value = cur.name; },
+      onError: onVoiceError
+    });
+    S.voice.setVolume(S.vol); S.brain = new Eco.Brain({ api: API });
+    if (S.voice.voices.length) S.voice.h.onVoices(S.voice.voices, S.voice.voice);
+ 
+    startLoop(); setState('boot');
+    $('#eco-st').textContent = 'PERMITA O MICROFONE';
+    var micP = Eco.voiceSupport.stt ? S.voice.enableMic() : Promise.resolve('unsupported');
+    Promise.all([micP, S.brain.health()]).then(function (r) {
+      if (S.ended) return;
+      var mic = r[0]; setMode(S.brain.online ? 'ia' : 'local');
+      if (!S.brain.online) toast('Servidor de IA não encontrado ou sem chave: modo local limitado. Veja as instruções (server.js).', 7000);
+      if (mic === 'denied') { S.noMic = true; toast('Microfone bloqueado. Permita o acesso pelo cadeado da barra de endereço ou use o teclado.', 8000); }
+      else if (mic === 'none') { S.noMic = true; toast('Nenhum microfone encontrado. Use o teclado.', 6000); }
+      else if (mic === 'unsupported') { S.noMic = true; }
+      if (S.noMic) { S.micOn = false; $('#eco-mic').setAttribute('aria-pressed', 'false'); $('#eco-kbd').hidden = false; }
+      setTimeout(function () { if (!S.ended) runTurn('intro'); }, 1200);              // a face ainda está se materializando
+    });
+  }
+ 
+  function onVoiceError(e) {
+    if (e.fatal) {
+      S.noMic = true; S.micOn = false; $('#eco-mic').setAttribute('aria-pressed', 'false'); $('#eco-kbd').hidden = false;
+      toast({ denied: 'Permissão do microfone negada. Libere nas configurações do navegador ou digite.', 'no-mic': 'Microfone indisponível. Digite sua resposta.', lang: 'Idioma pt-BR não suportado pelo reconhecimento. Digite sua resposta.', unsupported: 'Reconhecimento de voz indisponível aqui. Digite sua resposta.' }[e.code] || 'Erro no reconhecimento de voz.', 7000);
+      if (S.state === 'listening') setState('idle');
+    } else if (e.code === 'network') { if (e.count === 2) toast('Falha de rede no reconhecimento de voz. Tentando reconectar…'); if (e.count >= 5) { toast('Reconhecimento indisponível. Use o teclado.', 6000); $('#eco-kbd').hidden = false; } }
+    else if (e.code === 'tts' && S.voice.ttsFails === 2) toast('A síntese de voz falhou; usando só legendas.');
+  }
+ 
+  /* ------------------------------ final ------------------------------ */
+  function finale() {
+    if (S.ended || S.state === 'finale') return;
+    S.voice.stop(); setState('finale'); clearTimeout(S.nudgeT);
+    $('#eco-sub').classList.add('hide'); $('#eco-ui').style.opacity = '0'; $('#eco-ui').style.pointerEvents = 'none';
+    if (S.scene.ok) S.scene.startFinale();
+    window.dispatchEvent(new CustomEvent('eco:finale'));
+    setTimeout(function () { $('#eco-final').classList.add('show'); $('#eco-back').focus(); }, reduced ? 500 : 5200);
+  }
+ 
+  function restart() {
+    $('#eco-final').classList.remove('show'); $('#eco-ui').style.opacity = ''; $('#eco-ui').style.pointerEvents = ''; $('#eco-sub').classList.remove('hide');
+    $('#eco-ai').textContent = ''; $('#eco-you').textContent = '';
+    teardown(false); S.started = false; $('#eco-intro').hidden = false; $('#eco-go').focus();
+  }
+ 
+  function teardown(full) {
+    S.ended = true; clearTimeout(S.nudgeT); cancelAnimationFrame(S.raf); if (S.abort) S.abort.abort();
+    if (S.voice) S.voice.destroy(); if (S.scene) S.scene.dispose();
+    if (S.vis) document.removeEventListener('visibilitychange', S.vis);
+    if (S.res) { window.removeEventListener('resize', S.res); document.removeEventListener('fullscreenchange', S.res); }
+    S.voice = S.scene = S.brain = null;
+    if (!full) { S.ended = false; var c = $('#eco-canvas'), n = c.cloneNode(false); c.parentNode.replaceChild(n, c); }
+  }
+ 
+  function endExperience() {
+    if (document.fullscreenElement) try { document.exitFullscreen(); } catch (e) {}
+    document.removeEventListener('keydown', onKey);
+    teardown(true); root.classList.remove('open'); root.remove(); root = null;
+    ['stage-reveal', 'details-section'].forEach(function (id) { var n = document.getElementById(id); if (n) n.inert = false; });
+    window.dispatchEvent(new CustomEvent('eco:close')); S = {};
+    if (Eco._opener) Eco._opener.focus();
+  }
+ 
+  /* ------------------------------ loop ------------------------------ */
+  function startLoop() {
+    S.last = performance.now(); S.lastRender = 0; S.fc = 0;
+    S.res = function () { if (S.scene && S.scene.ok) S.scene.resize(); }; window.addEventListener('resize', S.res);
+    document.addEventListener('fullscreenchange', S.res);
+    S.vis = function () {
+      if (document.hidden) { cancelAnimationFrame(S.raf); S.raf = 0; if (S.voice) { S.voice.suspend(); S.voice.pauseAll(); } }
+      else if (!S.raf && !S.ended) { S.last = performance.now(); S.raf = requestAnimationFrame(frame); if (S.voice) { S.voice.resumeAll(); if (S.state === 'listening') S.voice.resume(200); } }
+    };
+    document.addEventListener('visibilitychange', S.vis);
+    S.raf = requestAnimationFrame(frame);
+  }
+ 
+  function frame(now) {
+    S.raf = requestAnimationFrame(frame);
+    var idle = (S.state === 'listening' || S.state === 'idle') && now - (S.activity || 0) > 45000 && (!S.voice || S.voice.level < 0.05);
+    var cap = idle ? 20 : 60; if (now - S.lastRender < 1000 / cap - 2) return;     // economia quando inativo
+    var dt = Math.min(0.05, (now - S.last) / 1000 || 0.016); S.last = now; S.lastRender = now;
+    var level = S.voice ? S.voice.getLevel() : 0, mouth = S.voice ? S.voice.mouth() : { open: 0, wide: 0, round: 0 };
+    if (S.scene && S.scene.ok) {
+      if (idle && S.scene.lod > 0.6 && !S.idleLod) { S.idleLod = S.scene.lod; S.scene.setLod(0.6); } else if (!idle && S.idleLod) { S.scene.setLod(S.idleLod); S.idleLod = 0; }
+      S.scene.update(dt, { micLevel: level, mouth: mouth }); S.scene.render();
+    } else root.style.setProperty('--lvl', Math.max(level, mouth.open).toFixed(2));
+    var bars = root.querySelectorAll('.eco-bars i'), e = S.state === 'speaking' ? mouth.open : level;
+    if (S.state !== 'thinking') for (var i = 0; i < bars.length; i++) bars[i].style.transform = 'scaleY(' + (0.15 + Math.min(1, e * (0.7 + 0.5 * Math.sin(now / 90 + i * 1.7))) * 0.85).toFixed(2) + ')';
+    syncSubs();
+    if (S.scene && S.scene.ok && (++S.fc % 45 === 1)) {                       // mantém o rosto acima da interface
+      var ui = $('#eco-status').getBoundingClientRect(), h = root.clientHeight || 1, f = Math.min(0.7, Math.max(0.1, 1 - ui.top / h));
+      if (Math.abs(f - (S.scene.uiFrac || 0)) > 0.01) S.scene.setFraming(f);
+    }
+  }
+ 
+  /* ------------------------------ API pública ------------------------------ */
+  Eco.open = function (opener) {
+    Eco._opener = opener || null; S = {}; build();
+    ['stage-reveal', 'details-section'].forEach(function (id) { var n = document.getElementById(id); if (n) n.inert = true; });
+    window.dispatchEvent(new CustomEvent('eco:open'));
+    root.classList.add('open'); $('#eco-go').focus();
+    return root;
+  };
+  Eco._state = function () { return S; };       // usado nos testes
+})();
+ 
