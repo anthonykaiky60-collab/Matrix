@@ -1,0 +1,12 @@
+{
+  "name": "matrix-eco",
+  "version": "1.0.0",
+  "description": "Site de relançamento de Matrix com IA conversacional por voz, rosto de partículas e 3D estereoscópico",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
