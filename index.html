@@ -89,3 +89,1057 @@
 <script src="script.js" defer></script>
 </body>
 </html>
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MATRIX — A escolha recomeça</title>
+<meta name="description" content="Experiência de relançamento de Matrix. Uma contagem regressiva, uma falha na simulação, uma escolha.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ============ DESIGN TOKENS ============
+     Ajuste as cores, fontes e ritmo da experiência aqui. */
+  :root{
+    --room-bg: #f6f5f2;
+    --room-ink: #101210;
+    --room-ink-soft: #55584f;
+
+    --void: #030a06;
+    --void-deep: #010402;
+    --code-dim: #0c5c2c;
+    --code-mid: #17b352;
+    --code-bright: #6dffb0;
+    --code-white: #eafff2;
+    --spark: #c9fff0;
+
+    --paper: #eef7ee;
+
+    --font-display: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif;
+    --font-mono: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+
+    --ease-out: cubic-bezier(.19,1,.22,1);
+    --dur-slow: 1.4s;
+  }
+
+  *{ box-sizing: border-box; }
+  html,body{
+    margin:0; padding:0; height:100%;
+    background: var(--room-bg);
+    color: var(--room-ink);
+    font-family: var(--font-mono);
+    overflow-x: hidden;
+  }
+  body{ min-height:100vh; }
+
+  .sr-only{
+    position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+    overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;
+  }
+
+  a{ color: inherit; }
+
+  /* ============ TOP CONTROLS ============ */
+  .top-controls{
+    position: fixed; top: 0; left:0; right:0;
+    display:flex; justify-content: space-between; align-items:flex-start;
+    padding: clamp(14px, 3vw, 26px);
+    z-index: 50;
+    pointer-events: none;
+  }
+  .top-controls > *{ pointer-events: auto; }
+
+  .chip-btn{
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    letter-spacing: .02em;
+    background: rgba(255,255,255,0.72);
+    color: var(--room-ink);
+    border: 1px solid rgba(16,18,16,0.18);
+    border-radius: 999px;
+    padding: 9px 16px;
+    cursor: pointer;
+    display:inline-flex; align-items:center; gap:8px;
+    transition: background .3s var(--ease-out), border-color .3s var(--ease-out), color .3s var(--ease-out);
+  }
+  .chip-btn:hover{ border-color: rgba(16,18,16,0.4); }
+  .chip-btn:focus-visible{
+    outline: 2px solid #1f7a46; outline-offset: 2px;
+  }
+
+  body.in-matrix .chip-btn{
+    background: rgba(3,10,6,0.55);
+    color: var(--code-bright);
+    border-color: rgba(109,255,176,0.35);
+    backdrop-filter: blur(6px);
+  }
+  body.in-matrix .chip-btn:hover{ border-color: rgba(109,255,176,0.7); }
+  body.in-matrix .chip-btn:focus-visible{ outline-color: var(--code-bright); }
+
+  .dot{
+    width:7px; height:7px; border-radius:50%;
+    background: currentColor; opacity:.55;
+  }
+  #sound-toggle[aria-pressed="true"] .dot{ opacity:1; box-shadow: 0 0 6px currentColor; }
+
+  /* ============ STAGE 1 — WHITE ROOM ============ */
+  .stage-white{
+    position: fixed; inset:0;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center;
+    background: var(--room-bg);
+    padding: 24px;
+    z-index: 20;
+    transition: opacity var(--dur-slow) var(--ease-out), filter var(--dur-slow) var(--ease-out);
+  }
+  .stage-white::before{
+    /* faint room seam lines, barely visible — minimal architecture, not decoration */
+    content:"";
+    position:absolute; inset: 6%;
+    border: 1px solid rgba(16,18,16,0.06);
+    pointer-events:none;
+  }
+
+  .enigma{
+    font-size: clamp(1rem, 2.6vw, 1.4rem);
+    color: var(--room-ink-soft);
+    max-width: 34ch;
+    line-height: 1.6;
+    min-height: 2.4em;
+    opacity: 0;
+  }
+  .enigma.show{
+    animation: rise .9s var(--ease-out) forwards;
+  }
+
+  .countdown-wrap{
+    margin-top: clamp(28px, 6vw, 56px);
+    min-height: clamp(90px, 18vw, 160px);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .countdown{
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(64px, 14vw, 160px);
+    line-height: 1;
+    color: var(--room-ink);
+    position: relative;
+    opacity: 0;
+    letter-spacing: -0.02em;
+  }
+  .countdown.show{ animation: rise .7s var(--ease-out) forwards; }
+
+  .countdown.glitching{
+    animation: glitch-jitter .18s steps(2, end);
+  }
+  .countdown.glitching::before,
+  .countdown.glitching::after{
+    content: attr(data-value);
+    position:absolute; left:0; top:0; width:100%;
+    mix-blend-mode: multiply;
+  }
+  .countdown.glitching::before{
+    color:#ff2b52; transform: translate(2px,-1px);
+    clip-path: inset(10% 0 55% 0);
+  }
+  .countdown.glitching::after{
+    color:#1fb3ff; transform: translate(-2px,1px);
+    clip-path: inset(55% 0 8% 0);
+  }
+
+  .countdown-label{
+    position:absolute; bottom: -1.6em; left:0; right:0;
+    font-family: var(--font-mono); font-size: 0.72rem;
+    color: var(--room-ink-soft); letter-spacing: .04em;
+  }
+
+  .flash{
+    position: fixed; inset:0; background:#fff; z-index: 45;
+    opacity:0; pointer-events:none;
+  }
+  .flash.pulse{ animation: flashpulse 1.1s var(--ease-out) forwards; }
+
+  /* ============ STAGE 2 — MATRIX CANVAS ============ */
+  #matrix-canvas{
+    position: fixed; inset:0; width:100%; height:100%;
+    display:block; background: var(--void);
+    opacity: 0;
+    transition: opacity 1.6s var(--ease-out);
+    z-index: 5;
+  }
+  body.in-matrix #matrix-canvas{ opacity: 1; }
+  body.in-matrix{ background: var(--void); }
+
+  /* ============ STAGE 3 — CINEMATIC REVEAL ============ */
+  .stage-reveal{
+    position: relative; z-index: 10;
+    min-height: 100vh;
+    display:flex; flex-direction:column; align-items:center;
+    padding: clamp(90px, 14vh, 160px) clamp(18px, 6vw, 60px) 100px;
+    opacity: 0;
+    color: var(--code-white);
+  }
+  .stage-reveal.visible{ opacity: 1; transition: opacity .6s ease; }
+
+  .hero{
+    max-width: 780px; width:100%;
+    text-align:center;
+  }
+
+  .glitch-title{
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(48px, 11vw, 128px);
+    letter-spacing: 0.01em;
+    margin: 0 0 18px;
+    color: var(--code-bright);
+    position: relative;
+    opacity:0; transform: translateY(14px);
+  }
+  .stage-reveal.visible .glitch-title{
+    animation: settle .9s var(--ease-out) .15s forwards, title-flicker 3.6s ease-in-out .15s infinite;
+  }
+  .glitch-title::before,
+  .glitch-title::after{
+    content: attr(data-text);
+    position:absolute; left:0; top:0; width:100%; height:100%;
+    opacity: 0;
+  }
+
+  .tagline{
+    font-family: var(--font-mono);
+    font-size: clamp(0.95rem, 2vw, 1.2rem);
+    color: var(--code-white);
+    opacity:0; transform: translateY(10px);
+    margin: 0 0 8px;
+  }
+  .release-line{
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--code-dim);
+    letter-spacing: .04em;
+    opacity:0; transform: translateY(10px);
+    margin: 0 0 34px;
+  }
+  .stage-reveal.visible .tagline{ animation: settle .8s var(--ease-out) .45s forwards; }
+  .stage-reveal.visible .release-line{ animation: settle .8s var(--ease-out) .6s forwards; }
+
+  .cta-row{
+    display:flex; flex-wrap:wrap; gap: 14px; justify-content:center;
+    opacity:0; transform: translateY(10px);
+  }
+  .stage-reveal.visible .cta-row{ animation: settle .8s var(--ease-out) .8s forwards; }
+
+  .btn{
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    padding: 14px 26px;
+    border-radius: 3px;
+    cursor: pointer;
+    text-decoration:none;
+    display:inline-flex; align-items:center; gap:10px;
+    transition: transform .25s var(--ease-out), background .25s, border-color .25s, color .25s;
+  }
+  .btn:active{ transform: scale(0.97); }
+  .btn-primary{
+    background: var(--code-bright);
+    color: #041b0d;
+    border: 1px solid var(--code-bright);
+  }
+  .btn-primary:hover{ background: var(--code-white); }
+  .btn-secondary{
+    background: transparent;
+    color: var(--code-bright);
+    border: 1px solid rgba(109,255,176,0.4);
+  }
+  .btn-secondary:hover{ border-color: var(--code-bright); }
+  .btn:focus-visible{ outline: 2px solid var(--code-white); outline-offset: 3px; }
+
+  /* details panel, toggled open */
+  .details{
+    max-width: 720px; width:100%;
+    margin-top: 70px;
+    border-top: 1px solid rgba(109,255,176,0.18);
+    padding-top: 40px;
+    display: grid; gap: 30px;
+  }
+  .details[hidden]{ display:none; }
+
+  .detail-block{
+    opacity: 0; transform: translateY(8px);
+  }
+  .details.visible .detail-block{
+    animation: settle .6s var(--ease-out) forwards;
+  }
+  .details.visible .detail-block:nth-child(1){ animation-delay: .05s; }
+  .details.visible .detail-block:nth-child(2){ animation-delay: .18s; }
+  .details.visible .detail-block:nth-child(3){ animation-delay: .31s; }
+
+  .detail-block h2{
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+    font-weight: 500;
+    color: var(--code-bright);
+    margin: 0 0 8px;
+  }
+  .detail-block p{
+    font-family: var(--font-mono);
+    font-size: 0.92rem;
+    line-height: 1.7;
+    color: rgba(234,255,242,0.82);
+    margin: 0;
+    max-width: 62ch;
+  }
+
+  .hint{
+    margin-top: 46px;
+    font-size: 0.72rem;
+    color: rgba(109,255,176,0.5);
+    text-align:center;
+    max-width: 46ch;
+  }
+
+  /* ============ KEYFRAMES ============ */
+  @keyframes rise{
+    from{ opacity:0; transform: translateY(10px); }
+    to{ opacity:1; transform: translateY(0); }
+  }
+  @keyframes settle{
+    from{ opacity:0; transform: translateY(14px); }
+    to{ opacity:1; transform: translateY(0); }
+  }
+  @keyframes glitch-jitter{
+    0%{ transform: translate(0,0); }
+    30%{ transform: translate(-1.5px, 1px) skewX(1deg); }
+    60%{ transform: translate(1.5px, -1px) skewX(-1deg); }
+    100%{ transform: translate(0,0); }
+  }
+  @keyframes flashpulse{
+    0%{ opacity:0; }
+    12%{ opacity: 0.96; }
+    100%{ opacity:0; }
+  }
+  @keyframes title-flicker{
+    0%, 92%, 100%{ opacity:1; text-shadow: 0 0 18px rgba(109,255,176,0.35); }
+    93%{ opacity:0.4; }
+    94%{ opacity:1; text-shadow: 0 0 2px rgba(109,255,176,0.1); }
+    95%{ opacity:0.7; }
+    96%{ opacity:1; }
+  }
+
+  /* ============ MODAL — Óculos Meta × Matrix ============ */
+  .btn-glasses{
+    background: transparent;
+    color: var(--spark);
+    border: 1px solid rgba(201,255,240,0.4);
+  }
+  .btn-glasses:hover{ border-color: var(--spark); background: rgba(201,255,240,0.08); }
+
+  .modal-overlay{
+    position: fixed; inset: 0; z-index: 80;
+    display:flex; align-items:center; justify-content:center;
+    padding: 20px;
+    background: rgba(1,4,2,0.82);
+    backdrop-filter: blur(4px);
+    opacity: 0;
+    transition: opacity .25s var(--ease-out);
+  }
+  .modal-overlay.visible{ opacity: 1; }
+  .modal-overlay[hidden]{ display:none; }
+
+  .modal-box{
+    position: relative;
+    width: 100%; max-width: 720px;
+    background: #04140a;
+    border: 1px solid rgba(109,255,176,0.25);
+    border-radius: 8px;
+    padding: clamp(20px, 4vw, 34px);
+    transform: translateY(10px) scale(0.98);
+    transition: transform .3s var(--ease-out);
+  }
+  .modal-overlay.visible .modal-box{ transform: translateY(0) scale(1); }
+
+  .modal-box h2{
+    font-family: var(--font-display);
+    font-size: clamp(1.1rem, 3vw, 1.5rem);
+    color: var(--code-bright);
+    margin: 0 0 10px;
+    padding-right: 34px;
+  }
+  .modal-box p{
+    font-family: var(--font-mono);
+    font-size: 0.88rem;
+    color: rgba(234,255,242,0.78);
+    line-height: 1.6;
+    margin: 0 0 20px;
+  }
+  .modal-video{
+    display:block; width: 100%; height:auto;
+    border-radius: 4px;
+    background: #000;
+  }
+
+  /* embed responsivo do trailer (YouTube), 16:9, bordas arredondadas */
+  .modal-box-video{
+    max-width: 900px;
+    padding: 14px;
+  }
+  .video-embed{
+    position: relative;
+    width: 100%;
+    padding-top: 56.25%; /* proporção 16:9 */
+    border-radius: 10px;
+    overflow: hidden;
+    background: #000;
+  }
+  .video-embed iframe{
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    border: 0; border-radius: 10px;
+  }
+  .modal-close{
+    position:absolute; top: 14px; right: 14px;
+    width: 34px; height: 34px; border-radius: 50%;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.18);
+    color: var(--code-white);
+    font-size: 1rem; line-height: 1;
+    cursor: pointer;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .modal-close:hover{ background: rgba(255,255,255,0.14); }
+  .modal-close:focus-visible{ outline: 2px solid var(--code-bright); outline-offset: 2px; }
+
+  @media (max-width: 480px){
+    .modal-box{ padding: 18px; }
+  }
+
+  /* ============ ACCESSIBILITY: reduced motion ============ */
+  @media (prefers-reduced-motion: reduce){
+    *{
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.15s !important;
+    }
+    .flash{ display:none; }
+  }
+
+  /* ============ RESPONSIVE ============ */
+  @media (max-width: 480px){
+    .cta-row{ flex-direction: column; width: 100%; }
+    .btn{ justify-content:center; width:100%; }
+  }
+
+  @media (min-width: 900px){
+    .details{ grid-template-columns: 1fr 1fr; }
+    .details .detail-block:first-child{ grid-column: 1 / -1; }
+  }
+</style>
+<link rel="stylesheet" href="css/eco.css">
+</head>
+<body>
+
+<noscript>
+  <div style="padding:40px;font-family:sans-serif;max-width:600px;margin:0 auto;">
+    <h1>Matrix — o relançamento</h1>
+    <p>Esta experiência usa JavaScript para a animação e a contagem regressiva. Ative o JavaScript para vivenciar a versão completa. Enquanto isso: o relançamento está a caminho — em breve nos cinemas.</p>
+  </div>
+</noscript>
+
+<div id="announcer" class="sr-only" role="status" aria-live="polite"></div>
+
+<div class="top-controls">
+  <button id="skip-intro" class="chip-btn" type="button">Pular introdução</button>
+  <button id="sound-toggle" class="chip-btn" type="button" aria-pressed="false">
+    <span class="dot" aria-hidden="true"></span>
+    <span id="sound-label">Som desativado</span>
+  </button>
+</div>
+
+<div class="flash" id="flash" aria-hidden="true"></div>
+
+<section class="stage-white" id="stage-white" aria-hidden="false">
+  <p class="enigma" id="enigma"></p>
+  <div class="countdown-wrap">
+    <div class="countdown" id="countdown" data-value=""></div>
+  </div>
+</section>
+
+<canvas id="matrix-canvas" aria-hidden="true"></canvas>
+
+<main class="stage-reveal" id="stage-reveal">
+  <div class="hero">
+    <h1 class="glitch-title" id="glitch-title" data-text="MATRIX">MATRIX</h1>
+    <p class="tagline">Você já escolheu. Só ainda não sabe.</p>
+    <p class="release-line" id="release-line">RELANÇAMENTO NOS CINEMAS — 14 DE MARÇO</p>
+    <div class="cta-row">
+      <button class="btn btn-primary" id="cta-trailer" type="button" aria-haspopup="dialog" aria-controls="trailer-modal">Assistir ao trailer</button>
+      <button class="btn btn-secondary" id="cta-more" type="button" aria-expanded="false" aria-controls="details-section">
+        Saiba mais
+      </button>
+      <button class="btn btn-glasses" id="cta-glasses" type="button" aria-haspopup="dialog" aria-controls="glasses-modal">
+        Óculos Meta × Matrix
+      </button>
+      <button class="btn btn-eco" id="cta-eco" type="button" aria-haspopup="dialog">
+        Falar com a Consciência
+      </button>
+    </div>
+  </div>
+
+  <section class="details" id="details-section" hidden aria-label="Sobre o relançamento">
+    <div class="detail-block">
+      <h2>Uma versão restaurada</h2>
+      <p>A trilogia volta às telas em uma nova masterização, quadro a quadro, para uma geração que só conheceu a simulação em tela pequena.</p>
+    </div>
+    <div class="detail-block">
+      <h2>Nos cinemas</h2>
+      <p>Sessões especiais em salas selecionadas, com conteúdo exclusivo antes da exibição. Ingressos abrem em breve.</p>
+    </div>
+    <div class="detail-block">
+      <h2>A escolha</h2>
+      <p>Pílula azul ou vermelha — desta vez, a decisão também é sua fora da tela. Fique de olho nos próximos sinais.</p>
+    </div>
+  </section>
+
+  <p class="hint">mova o cursor ou toque na chuva de código — e experimente clicar nela.</p>
+</main>
+
+<div class="modal-overlay" id="trailer-modal" hidden>
+  <div class="modal-box modal-box-video" role="dialog" aria-modal="true" aria-labelledby="trailer-modal-title">
+    <button class="modal-close" id="trailer-modal-close" type="button" aria-label="Fechar trailer">✕</button>
+    <h2 id="trailer-modal-title" class="sr-only">Trailer do relançamento</h2>
+    <div class="video-embed">
+      <iframe id="trailer-iframe" src="" title="Trailer do relançamento de Matrix"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        allowfullscreen loading="lazy"></iframe>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="glasses-modal" hidden>
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="glasses-modal-title">
+    <button class="modal-close" id="glasses-modal-close" type="button" aria-label="Fechar vídeo">✕</button>
+    <h2 id="glasses-modal-title">A realidade também tem um upgrade.</h2>
+    <p>Os óculos inteligentes da Meta trazem a interface digital para o seu campo de visão — a fronteira entre o mundo real e a simulação nunca esteve tão próxima.</p>
+    <video class="modal-video" id="glasses-video" controls playsinline preload="none">
+      <source src="assets/oculos-meta-matrix.mp4" type="video/mp4">
+      Seu navegador não é compatível com vídeo em HTML5.
+    </video>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* =========================================================
+     CONFIG — ajuste aqui o ritmo e o conteúdo da experiência
+     ========================================================= */
+  var CONFIG = {
+    countdownFrom: 5,                 // segundos da contagem regressiva
+    enigmaLines: [
+      "Você já sentiu que este mundo não é real?",
+      "Alguém está prestes a te mostrar o porquê."
+    ],
+    enigmaLineDelayMs: 2200,          // tempo entre as frases enigmáticas
+    matrixFontSize: 16,               // tamanho dos caracteres da chuva
+    matrixSpeedMin: 0.4,
+    matrixSpeedMax: 1.1,
+    matrixChars: "アイウエオカキクケコサシスセソ0123456789ﾊﾐﾑﾒﾓﾔﾕﾖ+=<>",
+    interactionRadius: 130            // raio de reação ao cursor/toque, em px
+  };
+
+  var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  var body = document.body;
+  var stageWhite = document.getElementById("stage-white");
+  var enigmaEl = document.getElementById("enigma");
+  var countdownEl = document.getElementById("countdown");
+  var flashEl = document.getElementById("flash");
+  var canvas = document.getElementById("matrix-canvas");
+  var stageReveal = document.getElementById("stage-reveal");
+  var detailsSection = document.getElementById("details-section");
+  var ctaMore = document.getElementById("cta-more");
+  var skipBtn = document.getElementById("skip-intro");
+  var soundBtn = document.getElementById("sound-toggle");
+  var soundLabel = document.getElementById("sound-label");
+  var announcer = document.getElementById("announcer");
+
+  var ctx = canvas.getContext("2d");
+  var introFinished = false;
+  var timers = [];
+
+  function announce(msg){ announcer.textContent = msg; }
+
+  function clearTimers(){
+    timers.forEach(function(t){ clearTimeout(t); clearInterval(t); });
+    timers = [];
+  }
+
+  /* =========================================================
+     STAGE 1 — sala branca: mensagem enigmática + contagem
+     ========================================================= */
+  function typeLine(el, text, done){
+    if (reduceMotion){
+      el.textContent = text;
+      el.classList.add("show");
+      done && done();
+      return;
+    }
+    el.textContent = "";
+    el.classList.add("show");
+    var i = 0;
+    var t = setInterval(function(){
+      el.textContent += text.charAt(i);
+      i++;
+      if (i >= text.length){
+        clearInterval(t);
+        done && done();
+      }
+    }, 34);
+    timers.push(t);
+  }
+
+  function runEnigma(){
+    var lines = CONFIG.enigmaLines;
+    var idx = 0;
+    function showNext(){
+      if (introFinished) return;
+      typeLine(enigmaEl, lines[idx], function(){
+        idx++;
+        if (idx < lines.length){
+          var t = setTimeout(showNext, CONFIG.enigmaLineDelayMs);
+          timers.push(t);
+        } else {
+          var t2 = setTimeout(startCountdown, CONFIG.enigmaLineDelayMs * 0.7);
+          timers.push(t2);
+        }
+      });
+    }
+    showNext();
+  }
+
+  function startCountdown(){
+    if (introFinished) return;
+    var n = CONFIG.countdownFrom;
+    countdownEl.classList.add("show");
+    announce("Contagem regressiva iniciada.");
+
+    function tick(){
+      if (introFinished) return;
+      countdownEl.textContent = n;
+      countdownEl.setAttribute("data-value", n);
+      if (!reduceMotion && Math.random() < 0.6){
+        countdownEl.classList.add("glitching");
+        var g = setTimeout(function(){ countdownEl.classList.remove("glitching"); }, 160);
+        timers.push(g);
+      }
+      if (n % 2 === 0) announce(n + " segundos.");
+
+      if (n <= 0){
+        var t = setTimeout(triggerTransformation, 550);
+        timers.push(t);
+        return;
+      }
+      n--;
+      var t2 = setTimeout(tick, 1000);
+      timers.push(t2);
+    }
+    tick();
+  }
+
+  /* =========================================================
+     TRANSIÇÃO — sala branca -> chuva digital
+     ========================================================= */
+  function triggerTransformation(){
+    if (introFinished) return;
+    introFinished = true;
+    clearTimers();
+    announce("A simulação está sendo revelada.");
+
+    if (!reduceMotion){
+      flashEl.classList.add("pulse");
+    }
+
+    stageWhite.style.opacity = "0";
+    stageWhite.style.filter = "blur(6px)";
+    body.classList.add("in-matrix");
+    initMatrixRain();
+
+    var t = setTimeout(function(){
+      stageWhite.setAttribute("aria-hidden", "true");
+      stageWhite.style.display = "none";
+      revealCinematic();
+    }, reduceMotion ? 120 : 1500);
+    timers.push(t);
+  }
+
+  function skipIntro(){
+    if (introFinished){
+      // já revelado — leva o foco ao conteúdo principal
+      stageReveal.querySelector(".glitch-title").focus && stageReveal.focus();
+      return;
+    }
+    triggerTransformation();
+  }
+  skipBtn.addEventListener("click", skipIntro);
+
+  /* =========================================================
+     STAGE 2 — chuva de caracteres em canvas
+     ========================================================= */
+  var columns = [];
+  var dpr = Math.min(window.devicePixelRatio || 1, 2);
+  var pointer = { x: -9999, y: -9999, active: false };
+  var burst = null;
+
+  function resizeCanvas(){
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+    canvas.style.width = window.innerWidth + "px";
+    canvas.style.height = window.innerHeight + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    setupColumns();
+  }
+
+  function setupColumns(){
+    var fs = CONFIG.matrixFontSize;
+    var count = Math.floor(window.innerWidth / fs);
+    columns = [];
+    for (var i = 0; i < count; i++){
+      columns.push({
+        x: i * fs,
+        y: Math.random() * -window.innerHeight,
+        speed: CONFIG.matrixSpeedMin + Math.random() * (CONFIG.matrixSpeedMax - CONFIG.matrixSpeedMin)
+      });
+    }
+  }
+
+  function initMatrixRain(){
+    resizeCanvas();
+    if (!rafId) drawFrame();
+  }
+
+  var rafId = null, rainPaused = false;
+  /* economia de GPU: a experiência ECO cobre a tela inteira, então pausamos a chuva 2D por trás */
+  window.addEventListener("eco:open", function(){ rainPaused = true; });
+  window.addEventListener("eco:close", function(){ rainPaused = false; if (!rafId && body.classList.contains("in-matrix")) drawFrame(); });
+  function drawFrame(){
+    if (rainPaused){ rafId = null; return; }
+    var fs = CONFIG.matrixFontSize;
+    ctx.fillStyle = "rgba(3,10,6,0.15)";
+    ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+    ctx.font = fs + "px monospace";
+    ctx.textBaseline = "top";
+
+    for (var i = 0; i < columns.length; i++){
+      var col = columns[i];
+      var ch = CONFIG.matrixChars.charAt(Math.floor(Math.random() * CONFIG.matrixChars.length));
+
+      var dx = col.x - pointer.x;
+      var dy = col.y - pointer.y;
+      var dist = Math.sqrt(dx * dx + dy * dy);
+      var near = pointer.active && dist < CONFIG.interactionRadius;
+
+      if (near){
+        var glow = 1 - (dist / CONFIG.interactionRadius);
+        ctx.fillStyle = glow > 0.6 ? "#eafff2" : "#8dffc4";
+      } else if (Math.random() < 0.04){
+        ctx.fillStyle = "#c9fff0"; // leading spark, ocasional
+      } else {
+        ctx.fillStyle = Math.random() < 0.5 ? "#0c5c2c" : "#17b352";
+      }
+
+      ctx.fillText(ch, col.x, col.y);
+
+      col.y += fs * col.speed * (near ? 1.6 : 1);
+      if (col.y > window.innerHeight && Math.random() > 0.975){
+        col.y = Math.random() * -200;
+      }
+    }
+    rafId = requestAnimationFrame(drawFrame);
+  }
+
+  window.addEventListener("resize", debounce(resizeCanvas, 150));
+
+  function debounce(fn, wait){
+    var t;
+    return function(){
+      clearTimeout(t);
+      var args = arguments;
+      t = setTimeout(function(){ fn.apply(null, args); }, wait);
+    };
+  }
+
+  function setPointer(x, y){
+    pointer.x = x; pointer.y = y; pointer.active = true;
+  }
+  function clearPointer(){ pointer.active = false; }
+
+  canvas.addEventListener("pointermove", function(e){ setPointer(e.clientX, e.clientY); });
+  canvas.addEventListener("pointerleave", clearPointer);
+  canvas.addEventListener("pointerdown", function(e){
+    setPointer(e.clientX, e.clientY);
+    burstAt(e.clientX);
+  });
+  window.addEventListener("blur", clearPointer);
+
+  function burstAt(x){
+    var fs = CONFIG.matrixFontSize;
+    columns.forEach(function(col){
+      if (Math.abs(col.x - x) < 90){
+        col.y = 0;
+        col.speed = CONFIG.matrixSpeedMax * 1.8;
+      }
+    });
+  }
+
+  /* =========================================================
+     STAGE 3 — revelação cinematográfica
+     ========================================================= */
+  function revealCinematic(){
+    stageReveal.hidden = false;
+    stageReveal.classList.add("visible");
+    stageReveal.setAttribute("tabindex", "-1");
+    announce("Matrix. Relançamento nos cinemas.");
+    var t = setTimeout(function(){ stageReveal.focus(); }, 900);
+    timers.push(t);
+  }
+
+  ctaMore.addEventListener("click", function(){
+    var expanded = ctaMore.getAttribute("aria-expanded") === "true";
+    ctaMore.setAttribute("aria-expanded", String(!expanded));
+    if (!expanded){
+      detailsSection.hidden = false;
+      requestAnimationFrame(function(){ detailsSection.classList.add("visible"); });
+      ctaMore.textContent = "Ocultar detalhes";
+      detailsSection.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "nearest" });
+    } else {
+      detailsSection.classList.remove("visible");
+      detailsSection.hidden = true;
+      ctaMore.textContent = "Saiba mais";
+    }
+  });
+
+  /* =========================================================
+     MODAL — Trailer (YouTube)
+     O iframe só recebe "src" quando o modal abre (evita carregar
+     o player do YouTube sem necessidade) e o src é limpo ao
+     fechar, o que interrompe a reprodução.
+     ========================================================= */
+  var TRAILER_EMBED_URL = "https://www.youtube.com/embed/2KnZac176Hs?rel=0";
+  var trailerBtn = document.getElementById("cta-trailer");
+  var trailerModal = document.getElementById("trailer-modal");
+  var trailerClose = document.getElementById("trailer-modal-close");
+  var trailerIframe = document.getElementById("trailer-iframe");
+
+  function onTrailerKeydown(e){
+    if (e.key === "Escape") closeTrailerModal();
+  }
+
+  function openTrailerModal(){
+    lastFocusedBeforeModal = document.activeElement;
+    trailerIframe.src = TRAILER_EMBED_URL + "&autoplay=1";
+    trailerModal.hidden = false;
+    body.style.overflow = "hidden";
+    requestAnimationFrame(function(){ trailerModal.classList.add("visible"); });
+    trailerClose.focus();
+    document.addEventListener("keydown", onTrailerKeydown);
+  }
+
+  function closeTrailerModal(){
+    trailerModal.classList.remove("visible");
+    trailerIframe.src = ""; // interrompe a reprodução ao fechar
+    body.style.overflow = "";
+    document.removeEventListener("keydown", onTrailerKeydown);
+    setTimeout(function(){ trailerModal.hidden = true; }, 250);
+    if (lastFocusedBeforeModal) lastFocusedBeforeModal.focus();
+  }
+
+  trailerBtn.addEventListener("click", openTrailerModal);
+  trailerClose.addEventListener("click", closeTrailerModal);
+  trailerModal.addEventListener("click", function(e){
+    if (e.target === trailerModal) closeTrailerModal();
+  });
+
+  /* =========================================================
+     MODAL — Óculos Meta × Matrix
+     O vídeo só é carregado/tocado quando o usuário clica no
+     botão (preload="none" no HTML). Fecha com Esc, clique fora
+     ou no botão de fechar; o foco volta ao botão que abriu.
+     ========================================================= */
+  var glassesBtn = document.getElementById("cta-glasses");
+  var glassesModal = document.getElementById("glasses-modal");
+  var glassesClose = document.getElementById("glasses-modal-close");
+  var glassesVideo = document.getElementById("glasses-video");
+  var lastFocusedBeforeModal = null;
+
+  function onModalKeydown(e){
+    if (e.key === "Escape") closeGlassesModal();
+  }
+
+  function openGlassesModal(){
+    lastFocusedBeforeModal = document.activeElement;
+    glassesModal.hidden = false;
+    body.style.overflow = "hidden";
+    requestAnimationFrame(function(){ glassesModal.classList.add("visible"); });
+    glassesClose.focus();
+    document.addEventListener("keydown", onModalKeydown);
+    // toca o vídeo pois a ação já é um clique explícito do usuário no botão
+    glassesVideo.play().catch(function(){ /* alguns navegadores exigem novo clique no player */ });
+  }
+
+  function closeGlassesModal(){
+    glassesModal.classList.remove("visible");
+    glassesVideo.pause();
+    glassesVideo.currentTime = 0;
+    body.style.overflow = "";
+    document.removeEventListener("keydown", onModalKeydown);
+    setTimeout(function(){ glassesModal.hidden = true; }, 250);
+    if (lastFocusedBeforeModal) lastFocusedBeforeModal.focus();
+  }
+
+  glassesBtn.addEventListener("click", openGlassesModal);
+  glassesClose.addEventListener("click", closeGlassesModal);
+  glassesModal.addEventListener("click", function(e){
+    if (e.target === glassesModal) closeGlassesModal();
+  });
+
+  /* =========================================================
+     SOM OPCIONAL — nunca autoplay, só inicia por clique
+     Áudio gerado via Web Audio API: nenhum arquivo externo.
+     ========================================================= */
+  var audioCtx = null;
+  var soundOn = false;
+  var soundNodes = null;
+
+  function buildAmbience(){
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    var master = audioCtx.createGain();
+    master.gain.value = 0.0001;
+    master.connect(audioCtx.destination);
+
+    // zumbido grave contínuo
+    var drone = audioCtx.createOscillator();
+    drone.type = "sine";
+    drone.frequency.value = 52;
+    var droneGain = audioCtx.createGain();
+    droneGain.gain.value = 0.18;
+    drone.connect(droneGain).connect(master);
+    drone.start();
+
+    // ruído filtrado, como estática de terminal
+    var bufferSize = audioCtx.sampleRate * 2;
+    var noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    var data = noiseBuffer.getChannelData(0);
+    for (var i = 0; i < bufferSize; i++){ data[i] = (Math.random() * 2 - 1) * 0.35; }
+    var noise = audioCtx.createBufferSource();
+    noise.buffer = noiseBuffer;
+    noise.loop = true;
+    var noiseFilter = audioCtx.createBiquadFilter();
+    noiseFilter.type = "bandpass";
+    noiseFilter.frequency.value = 1200;
+    var noiseGain = audioCtx.createGain();
+    noiseGain.gain.value = 0.05;
+    noise.connect(noiseFilter).connect(noiseGain).connect(master);
+    noise.start();
+
+    master.gain.linearRampToValueAtTime(0.5, audioCtx.currentTime + 1.2);
+
+    soundNodes = { master: master, drone: drone, noise: noise, blipTimer: null };
+    scheduleBlips();
+  }
+
+  function scheduleBlips(){
+    function blip(){
+      if (!soundOn || !audioCtx) return;
+      var osc = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      osc.type = "square";
+      osc.frequency.value = 300 + Math.random() * 900;
+      g.gain.value = 0;
+      osc.connect(g).connect(soundNodes.master);
+      var now = audioCtx.currentTime;
+      g.gain.linearRampToValueAtTime(0.06, now + 0.01);
+      g.gain.linearRampToValueAtTime(0, now + 0.09);
+      osc.start(now);
+      osc.stop(now + 0.1);
+      soundNodes.blipTimer = setTimeout(blip, 600 + Math.random() * 1800);
+    }
+    soundNodes.blipTimer = setTimeout(blip, 700);
+  }
+
+  function stopAmbience(){
+    if (!soundNodes) return;
+    clearTimeout(soundNodes.blipTimer);
+    var m = soundNodes.master;
+    var now = audioCtx.currentTime;
+    m.gain.cancelScheduledValues(now);
+    m.gain.setValueAtTime(m.gain.value, now);
+    m.gain.linearRampToValueAtTime(0.0001, now + 0.4);
+    var ctxToClose = audioCtx;
+    setTimeout(function(){
+      try{ soundNodes.drone.stop(); soundNodes.noise.stop(); }catch(e){}
+      ctxToClose.close();
+    }, 450);
+    soundNodes = null;
+    audioCtx = null;
+  }
+
+  soundBtn.addEventListener("click", function(){
+    soundOn = !soundOn;
+    soundBtn.setAttribute("aria-pressed", String(soundOn));
+    soundLabel.textContent = soundOn ? "Som ativado" : "Som desativado";
+    announce(soundOn ? "Som ativado." : "Som desativado.");
+    if (soundOn){
+      buildAmbience();
+    } else {
+      stopAmbience();
+    }
+  });
+
+  /* =========================================================
+     INÍCIO
+     ========================================================= */
+  if (reduceMotion){
+    // experiência ainda cinematográfica, mas sem glitch/flicker constante
+    enigmaEl.textContent = CONFIG.enigmaLines.join(" ");
+    enigmaEl.classList.add("show");
+    var t0 = setTimeout(startCountdown, 900);
+    timers.push(t0);
+  } else {
+    runEnigma();
+  }
+})();
+</script>
+
+<script>
+/* ECO — carregamento progressivo: os módulos (WebGL, voz, IA) só são baixados no primeiro clique. */
+(function(){
+  var btn = document.getElementById("cta-eco"), loading = null;
+  var FILES = ["js/eco/gl.js","js/eco/face.js","js/eco/scene.js","js/eco/voice.js","js/eco/brain.js","js/eco/app.js"];
+  function loadScript(src){
+    return new Promise(function(ok, no){
+      var s = document.createElement("script"); s.src = src + "?v=1"; s.onload = ok;
+      s.onerror = function(){ no(new Error("falha ao carregar " + src)); };
+      document.body.appendChild(s);
+    });
+  }
+  function ensure(){
+    if (window.Eco && window.Eco.open) return Promise.resolve();
+    if (!loading) loading = FILES.reduce(function(p, f){ return p.then(function(){ return loadScript(f); }); }, Promise.resolve());
+    return loading;
+  }
+  btn.addEventListener("click", function(){
+    var label = btn.textContent;
+    btn.disabled = true; btn.textContent = "Carregando…";
+    ensure().then(function(){ window.Eco.open(btn); })
+      .catch(function(e){ loading = null; alert("Não foi possível carregar a experiência. Verifique a conexão e tente de novo."); console.error(e); })
+      .then(function(){ btn.disabled = false; btn.textContent = label; });
+  });
+})();
+</script>
+</body>
+</html>
