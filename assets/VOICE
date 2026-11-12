@@ -1,0 +1,208 @@
+(function () {
+  'use strict';
+  var Eco = window.Eco = window.Eco || {};
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  Eco.voiceSupport = { stt: !!SR, tts: 'speechSynthesis' in window };
+ 
+  var CLOSED = { open: 0, wide: 0, round: 0, pos: 0 };
+  var VOW = { a: [.85, .15, 0], e: [.5, .55, 0], i: [.28, .85, 0], o: [.62, 0, .75], u: [.32, 0, .95] };
+  function norm(ch) { return ch.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); }
+ 
+  /* ------------------------- SINCRONIA LABIAL ------------------------- */
+  function LipSync() { this.active = false; this.cps = 14; }
+  LipSync.prototype.begin = function (text, rate, now) {
+    var units = [], start = [], i, ch, c;
+    for (i = 0; i < text.length; i++) {
+      ch = text.charAt(i); c = norm(ch); start.push(units.length);
+      if (VOW[c]) { var v = VOW[c]; units.push({ o: v[0], w: v[1], r: v[2] }, { o: v[0] * .85, w: v[1], r: v[2] }); }
+      else if ('mbp'.indexOf(c) >= 0 && c) units.push({ o: .02, w: 0, r: 0 });
+      else if ('fv'.indexOf(c) >= 0 && c) units.push({ o: .14, w: .3, r: 0 });
+      else if (/[,;:]/.test(ch)) units.push({ o: 0, w: 0, r: 0 }, { o: 0, w: 0, r: 0 });
+      else if (/[.!?…]/.test(ch)) units.push({ o: 0, w: 0, r: 0 }, { o: 0, w: 0, r: 0 }, { o: 0, w: 0, r: 0 });
+      else if (ch === ' ') units.push({ o: .08, w: 0, r: 0 });
+      else if (/[a-z]/.test(c)) units.push({ o: .24, w: .38, r: 'jxq'.indexOf(c) >= 0 ? .3 : 0 });
+      else units.push({ o: .05, w: 0, r: 0 });
+    }
+    this.units = units; this.start = start; this.len = text.length; this.text = text;
+    this.anchor = 0; this.t0 = now; this.cps = 14 * (rate || 1); this.last = null; this.active = true;
+    this.punch = /!\s*$/.test(text) ? 1.15 : 1;
+  };
+  LipSync.prototype.boundary = function (ci, now) {
+    if (this.last && now - this.last.t > 50 && ci > this.last.ci) {
+      var obs = (ci - this.last.ci) / ((now - this.last.t) / 1000);
+      this.cps = this.cps * .6 + Math.min(26, Math.max(7, obs)) * .4;
+    }
+    this.last = { ci: ci, t: now }; this.anchor = ci; this.t0 = now;
+  };
+  LipSync.prototype.pos = function (now) { return this.anchor + (now - this.t0) / 1000 * this.cps; };
+  LipSync.prototype.stop = function () { this.active = false; };
+  LipSync.prototype.get = function (now) {
+    if (!this.active) return CLOSED;
+    var p = this.pos(now); if (p >= this.len + 1.5) return { open: 0, wide: 0, round: 0, pos: this.len };
+    var ci = Math.min(this.len - 1, Math.max(0, Math.floor(p))), f = p - Math.floor(p);
+    var nextStart = ci + 1 < this.len ? this.start[ci + 1] : this.units.length, un = nextStart - this.start[ci];
+    var ui = this.start[ci] + Math.min(un - 1, Math.floor(f * un)), u = this.units[ui] || { o: 0, w: 0, r: 0 };
+    var env = 0.6 + 0.4 * Math.sin(Math.PI * ((f * un) % 1));
+    return { open: Math.min(1, u.o * env * this.punch), wide: u.w, round: u.r, pos: p };
+  };
+ 
+  /* ------------------------------ VOZ ------------------------------ */
+  function Voice(h) {
+    this.h = h || {}; this.wantListening = false; this.suspended = false; this.micEnabled = true;
+    this.recog = null; this.buf = ''; this.lastWasFinal = false; this.errs = 0; this.level = 0; this.activity = 0;
+    this.volume = 0.9; this.muted = false; this.queue = []; this.speaking = false; this.lip = new LipSync();
+    this.rate = 0.95; this.pitch = 0.8; this.voice = null; this.voices = []; this.ttsFails = 0; this.simulate = !Eco.voiceSupport.tts;
+    this.allowBarge = false; this.gen = 0;
+    var self = this;
+    if (Eco.voiceSupport.tts) {
+      var load = function () { self.voices = speechSynthesis.getVoices().filter(function (v) { return /^pt/i.test(v.lang); }); self._pick(); if (self.h.onVoices) self.h.onVoices(self.voices, self.voice); };
+      load(); speechSynthesis.addEventListener('voiceschanged', load);
+    }
+  }
+ 
+  Voice.prototype._pick = function () {
+    var saved = null; try { saved = localStorage.getItem('eco.voice'); } catch (e) {}
+    var v = this.voices, pick = null;
+    if (saved) pick = v.filter(function (x) { return x.name === saved; })[0];
+    if (!pick) pick = v.filter(function (x) { return /pt[-_]BR/i.test(x.lang) && /(felipe|daniel|antonio|ricardo|thiago|male|masc)/i.test(x.name); })[0]
+      || v.filter(function (x) { return /pt[-_]BR/i.test(x.lang); })[0] || v[0] || null;
+    this.voice = pick;
+  };
+  Voice.prototype.setVoice = function (name) {
+    var f = this.voices.filter(function (x) { return x.name === name; })[0]; if (f) { this.voice = f; try { localStorage.setItem('eco.voice', name); } catch (e) {} }
+  };
+ 
+  /* ---- microfone: permissão + medidor de nível ---- */
+  Voice.prototype.enableMic = function () {
+    var self = this;
+    if (IOS || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return Promise.resolve('no-meter');
+    return navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }).then(function (stream) {
+      self.stream = stream;
+      var AC = window.AudioContext || window.webkitAudioContext; self.ac = new AC();
+      var src = self.ac.createMediaStreamSource(stream); self.an = self.ac.createAnalyser(); self.an.fftSize = 512; src.connect(self.an);
+      self.td = new Uint8Array(self.an.fftSize); return 'ok';
+    }).catch(function (e) {
+      var denied = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError'), none = e && (e.name === 'NotFoundError' || e.name === 'OverconstrainedError');
+      return denied ? 'denied' : none ? 'none' : 'no-meter';
+    });
+  };
+  Voice.prototype.getLevel = function () {
+    var raw = 0;
+    if (this.an && this.micEnabled && !this.speaking) {
+      this.an.getByteTimeDomainData(this.td); var s = 0;
+      for (var i = 0; i < this.td.length; i++) { var d = (this.td[i] - 128) / 128; s += d * d; }
+      raw = Math.min(1, Math.sqrt(s / this.td.length) * 5);
+    } else if (this.wantListening && !this.suspended && performance.now() - this.activity < 600) raw = 0.45;
+    this.level += (raw - this.level) * 0.35; return this.level;
+  };
+ 
+  /* ---- STT ---- */
+  Voice.prototype.start = function () { this.wantListening = true; this.suspended = false; this._begin(); };
+  Voice.prototype.stop = function () { this.wantListening = false; this._abort(); clearTimeout(this.cTimer); clearTimeout(this.rTimer); this.buf = ''; };
+  Voice.prototype.suspend = function () { this.suspended = true; this._abort(); clearTimeout(this.cTimer); this.buf = ''; };
+  Voice.prototype.resume = function (delay) {
+    var self = this; this.suspended = false; clearTimeout(this.rTimer);
+    this.rTimer = setTimeout(function () { self._begin(); }, delay || 300);
+  };
+  Voice.prototype.setMic = function (on) {
+    this.micEnabled = on; if (this.stream) this.stream.getAudioTracks().forEach(function (t) { t.enabled = on; });
+    if (!on) { this._abort(); clearTimeout(this.cTimer); this.buf = ''; } else if (this.wantListening && !this.suspended) this._begin();
+  };
+  Voice.prototype._abort = function () { var r = this.recog; this.recog = null; if (r) { r.onend = r.onerror = r.onresult = null; try { r.abort(); } catch (e) {} } };
+ 
+  Voice.prototype._begin = function () {
+    var self = this;
+    if (!SR) { if (this.h.onError) this.h.onError({ code: 'unsupported', fatal: true }); return; }
+    if (!this.wantListening || this.suspended || !this.micEnabled || this.recog) return;
+    var r = new SR(); this.recog = r;
+    r.lang = 'pt-BR'; r.continuous = true; r.interimResults = true; r.maxAlternatives = 1;
+    r.onstart = function () { self.errs = 0; if (self.h.onListening) self.h.onListening(true); };
+    r.onresult = function (e) {
+      var text = '', last = e.results[e.results.length - 1];
+      for (var i = 0; i < e.results.length; i++) text += e.results[i][0].transcript;      // reconstrói tudo (evita duplicatas no Android)
+      text = text.trim(); self.activity = performance.now();
+      if (!text) return;
+      self.buf = text; self.lastWasFinal = last.isFinal;
+      if (self.h.onInterim) self.h.onInterim(text, last.isFinal);
+      clearTimeout(self.cTimer);
+      self.cTimer = setTimeout(function () { self._commit(); }, last.isFinal ? 750 : 1400);
+    };
+    r.onerror = function (e) {
+      var c = e.error;
+      if (c === 'no-speech' || c === 'aborted') return;
+      if (c === 'not-allowed' || c === 'service-not-allowed') { self.wantListening = false; if (self.h.onError) self.h.onError({ code: 'denied', fatal: true }); return; }
+      if (c === 'audio-capture') { self.wantListening = false; if (self.h.onError) self.h.onError({ code: 'no-mic', fatal: true }); return; }
+      if (c === 'language-not-supported') { if (self.h.onError) self.h.onError({ code: 'lang', fatal: true }); self.wantListening = false; return; }
+      self.errs++; if (self.h.onError) self.h.onError({ code: c === 'network' ? 'network' : 'unknown', fatal: false, count: self.errs });
+    };
+    r.onend = function () {
+      if (self.recog !== r) return; self.recog = null;
+      if (self.h.onListening) self.h.onListening(false);
+      if (self.buf && self.cTimer) return;                    // há frase pendente: o commit reinicia
+      if (self.wantListening && !self.suspended && self.micEnabled) {
+        var wait = Math.min(4000, 250 + self.errs * 700); clearTimeout(self.rTimer);
+        self.rTimer = setTimeout(function () { self._begin(); }, wait);
+      }
+    };
+    try { r.start(); } catch (e) { this.recog = null; }
+  };
+ 
+  Voice.prototype._commit = function () {
+    var text = (this.buf || '').trim(); this.buf = ''; clearTimeout(this.cTimer); this.cTimer = null;
+    this._abort(); if (this.h.onListening) this.h.onListening(false);
+    if (text.length >= 2 && this.h.onFinal) this.h.onFinal(text);
+    else if (this.wantListening && !this.suspended) this.resume(200);
+  };
+ 
+  /* ---- TTS ---- */
+  Voice.prototype.setVolume = function (v) { this.volume = v; if (this.cur) this.cur.volume = this.muted ? 0 : v; };
+  Voice.prototype.setMuted = function (m) { this.muted = m; };
+ 
+  Voice.prototype.say = function (text, meta) { this.queue.push({ text: text, meta: meta || {} }); if (!this.speaking) this._next(); };
+  Voice.prototype.cancelSpeech = function () {
+    this.gen++; this.queue.length = 0; this.speaking = false; this.lip.stop(); clearTimeout(this.wd); clearTimeout(this.simT); this.cur = null;
+    if (Eco.voiceSupport.tts) { try { speechSynthesis.cancel(); } catch (e) {} }
+  };
+  Voice.prototype.isBusy = function () { return this.speaking || this.queue.length > 0; };
+  Voice.prototype.mouth = function () { return this.speaking ? this.lip.get(performance.now()) : CLOSED; };
+  Voice.prototype.charPos = function () { return this.speaking ? this.lip.pos(performance.now()) : 0; };
+ 
+  Voice.prototype._next = function () {
+    var self = this, item = this.queue.shift();
+    if (!item) { this.speaking = false; this.lip.stop(); if (this.h.onSpeechIdle) this.h.onSpeechIdle(); return; }
+    this.speaking = true; var done = false, gen = this.gen;
+    function finish() { if (done || gen !== self.gen) return; done = true; clearTimeout(self.wd); clearTimeout(self.simT); self.lip.stop(); if (self.h.onSentenceEnd) self.h.onSentenceEnd(item.text); self._next(); }
+    function started() { if (item.started || gen !== self.gen) return; item.started = true; clearTimeout(self.wd); self.lip.begin(item.text, self.rate, performance.now()); if (self.h.onSentenceStart) self.h.onSentenceStart(item.text, item.meta); }
+ 
+    /* sem TTS disponível (ou quebrado): simula a duração, legendas e boca seguem funcionando */
+    if (this.simulate) {
+      started(); this.simT = setTimeout(finish, Math.max(900, item.text.length * 68)); return;
+    }
+    var u = new SpeechSynthesisUtterance(item.text); this.cur = u;
+    u.lang = 'pt-BR'; if (this.voice) u.voice = this.voice; u.rate = this.rate; u.pitch = this.pitch; u.volume = this.muted ? 0 : this.volume;
+    u.onstart = started;
+    u.onboundary = function (e) { if (item.started && e.name !== 'sentence') self.lip.boundary(e.charIndex, performance.now()); };
+    u.onend = finish;
+    u.onerror = function (e) { if (e.error === 'canceled' || e.error === 'interrupted') return; self.ttsFails++; if (self.h.onError) self.h.onError({ code: 'tts', fatal: false }); finish(); };
+    /* vigia: se a voz não começar em 3s, o TTS está mudo/quebrado → simula */
+    this.wd = setTimeout(function () {
+      if (item.started) return; self.ttsFails++;
+      try { speechSynthesis.cancel(); } catch (e) {}
+      if (self.ttsFails >= 2) self.simulate = true;
+      started(); self.simT = setTimeout(finish, Math.max(900, item.text.length * 68));
+    }, 3000);
+    try { speechSynthesis.speak(u); } catch (e) { this.ttsFails++; started(); this.simT = setTimeout(finish, Math.max(900, item.text.length * 68)); }
+  };
+ 
+  Voice.prototype.pauseAll = function () { if (Eco.voiceSupport.tts) try { speechSynthesis.pause(); } catch (e) {} };
+  Voice.prototype.resumeAll = function () { if (Eco.voiceSupport.tts) try { speechSynthesis.resume(); } catch (e) {} };
+  Voice.prototype.destroy = function () {
+    this.stop(); this.cancelSpeech();
+    if (this.stream) this.stream.getTracks().forEach(function (t) { t.stop(); });
+    if (this.ac) try { this.ac.close(); } catch (e) {}
+  };
+ 
+  Eco.Voice = Voice;
+})();
+ 
